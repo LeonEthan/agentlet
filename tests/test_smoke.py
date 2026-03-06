@@ -1,4 +1,4 @@
-"""Smoke tests for the scaffold."""
+"""Smoke tests for the installed package and CLI entrypoint."""
 
 import importlib
 import shutil
@@ -16,11 +16,11 @@ class ImportSmokeTest(unittest.TestCase):
         self.assertIsNotNone(script_path)
 
         completed = subprocess.run(
-            [script_path],
+            [script_path, "--help"],
             capture_output=True,
             check=False,
             text=True,
         )
 
         self.assertEqual(completed.returncode, 0)
-        self.assertIn("agentlet CLI scaffold only", completed.stdout)
+        self.assertIn("usage: agentlet", completed.stdout)

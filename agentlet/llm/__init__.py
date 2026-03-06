@@ -3,6 +3,7 @@
 from agentlet.llm.openai_like import (
     OpenAILikeModelClient,
     OpenAILikeTransport,
+    build_openai_like_transport,
     build_openai_like_request,
     parse_openai_like_response,
 )
@@ -10,6 +11,7 @@ from agentlet.llm.openai_like import (
 __all__ = [
     "OpenAILikeModelClient",
     "OpenAILikeTransport",
+    "build_openai_like_transport",
     "build_openai_like_request",
     "parse_openai_like_response",
 ]

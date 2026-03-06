@@ -9,6 +9,7 @@ from agentlet.runtime.events import (
     ApprovalResponse,
     RuntimeEvent,
     UserQuestionRequest,
+    UserQuestionResponse,
 )
 
 
@@ -24,3 +25,9 @@ class UserIO(Protocol):
 
     def begin_question_interrupt(self, request: UserQuestionRequest) -> None:
         """Surface a structured question and return control to the app for resume."""
+
+    def resolve_question_interrupt(
+        self,
+        request: UserQuestionRequest,
+    ) -> UserQuestionResponse:
+        """Collect a structured answer for a question interrupt."""
