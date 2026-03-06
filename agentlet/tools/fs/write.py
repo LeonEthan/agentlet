@@ -70,14 +70,8 @@ class WriteTool:
             )
 
         existed_before = target_path.exists()
-        try:
-            target_path.parent.mkdir(parents=True, exist_ok=True)
-            target_path.write_text(content_value, encoding="utf-8")
-        except OSError as exc:
-            return ToolResult.error(
-                f"Failed to write file: {path_value}: {exc}",
-                metadata={"path": path_value},
-            )
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        target_path.write_text(content_value, encoding="utf-8")
 
         created = not existed_before
         action = "Overwrote" if existed_before else "Created"
