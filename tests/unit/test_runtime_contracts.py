@@ -82,6 +82,17 @@ def test_question_interrupt_contract_requires_request_id() -> None:
         UserQuestionRequest.from_interrupt(interrupt)
 
 
+def test_question_interrupt_contract_requires_options_or_free_text() -> None:
+    with pytest.raises(
+        ValueError,
+        match="must include options or allow_free_text=True",
+    ):
+        UserQuestionRequest(
+            request_id="question_1",
+            prompt="Need clarification",
+        )
+
+
 def test_resume_request_schema_is_stable_and_validates_payload_kind() -> None:
     response_details = {"resume": {"channel": "cli"}}
     response = UserQuestionResponse(
@@ -154,5 +165,14 @@ def test_user_io_protocol_is_runtime_checkable() -> None:
 
         def begin_question_interrupt(self, request: UserQuestionRequest) -> None:
             self.last_question = request
+
+        def resolve_question_interrupt(
+            self,
+            request: UserQuestionRequest,
+        ) -> UserQuestionResponse:
+            return UserQuestionResponse(
+                request_id=request.request_id,
+                selected_option="readme",
+            )
 
     assert isinstance(FakeUserIO(), UserIO)

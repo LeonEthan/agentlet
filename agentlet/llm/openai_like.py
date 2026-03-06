@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 from agentlet.core.messages import Message, ToolCall
 from agentlet.core.types import JSONObject, TokenUsage, deep_copy_json_object
@@ -45,6 +47,61 @@ class OpenAILikeModelClient(ModelClient):
         )
         response_payload = self.transport(payload)
         return parse_openai_like_response(response_payload)
+
+
+def build_openai_like_transport(
+    *,
+    base_url: str,
+    api_key: str,
+    timeout_seconds: float = 60.0,
+) -> OpenAILikeTransport:
+    """Build a JSON-over-HTTP transport for OpenAI-like chat completions."""
+
+    if not base_url.strip():
+        raise ValueError("base_url must not be empty")
+    if not api_key.strip():
+        raise ValueError("api_key must not be empty")
+    if timeout_seconds <= 0:
+        raise ValueError("timeout_seconds must be > 0")
+
+    endpoint = f"{base_url.rstrip('/')}/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    def transport(payload: JSONObject) -> JSONObject:
+        request_body = json.dumps(payload).encode("utf-8")
+        request = Request(
+            endpoint,
+            data=request_body,
+            headers=headers,
+            method="POST",
+        )
+        try:
+            with urlopen(request, timeout=timeout_seconds) as response:
+                response_body = response.read().decode("utf-8")
+        except HTTPError as exc:
+            body = exc.read().decode("utf-8", errors="replace")
+            raise RuntimeError(
+                f"openai-like request failed with HTTP {exc.code}: {body}"
+            ) from exc
+        except URLError as exc:
+            raise RuntimeError(
+                f"openai-like request failed: {exc.reason}"
+            ) from exc
+
+        try:
+            response_payload = json.loads(response_body)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(
+                "openai-like response body was not valid JSON"
+            ) from exc
+        if not isinstance(response_payload, dict):
+            raise RuntimeError("openai-like response payload must be a JSON object")
+        return response_payload
+
+    return transport
 
 
 def build_openai_like_request(
@@ -337,4 +394,3 @@ def _require_mapping(payload: object, path: str) -> JSONObject:
 def _synthetic_tool_call_id(choice_index: int | None, tool_call_index: int) -> str:
     choice_suffix = 0 if choice_index is None else choice_index
     return f"call_{choice_suffix}_{tool_call_index}"
-

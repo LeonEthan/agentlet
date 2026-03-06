@@ -134,6 +134,10 @@ class UserQuestionRequest:
         if not self.prompt:
             raise ValueError("prompt must not be empty")
         object.__setattr__(self, "options", tuple(self.options))
+        if not self.options and not self.allow_free_text:
+            raise ValueError(
+                "question requests must include options or allow_free_text=True"
+            )
         object.__setattr__(self, "details", deep_copy_json_object(self.details))
 
     def as_dict(self) -> JSONObject:
