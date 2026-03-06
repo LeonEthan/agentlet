@@ -5,7 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal, Protocol, runtime_checkable
 
-from agentlet.core.types import InterruptMetadata, JSONObject
+from agentlet.core.types import (
+    InterruptMetadata,
+    JSONObject,
+    deep_copy_json_object,
+)
 
 ApprovalCategory = Literal[
     "read_only",
@@ -40,8 +44,8 @@ class ToolDefinition:
             raise ValueError(
                 f"unsupported approval category: {self.approval_category}"
             )
-        object.__setattr__(self, "input_schema", dict(self.input_schema))
-        object.__setattr__(self, "metadata", dict(self.metadata))
+        object.__setattr__(self, "input_schema", deep_copy_json_object(self.input_schema))
+        object.__setattr__(self, "metadata", deep_copy_json_object(self.metadata))
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,7 +59,7 @@ class ToolResult:
 
     def __post_init__(self) -> None:
         if self.metadata is not None:
-            object.__setattr__(self, "metadata", dict(self.metadata))
+            object.__setattr__(self, "metadata", deep_copy_json_object(self.metadata))
         interrupt_payload = None if self.metadata is None else self.metadata.get("interrupt")
         if self.interrupt and interrupt_payload is None:
             raise ValueError("interrupt results must include metadata['interrupt']")
@@ -81,7 +85,7 @@ class ToolResult:
         interrupt: InterruptMetadata,
         metadata: JSONObject | None = None,
     ) -> "ToolResult":
-        combined_metadata = dict(metadata or {})
+        combined_metadata = deep_copy_json_object(metadata or {})
         combined_metadata["interrupt"] = interrupt.as_dict()
         return cls(output=output, metadata=combined_metadata, interrupt=True)
 

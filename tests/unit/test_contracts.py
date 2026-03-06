@@ -95,6 +95,86 @@ def test_message_contract_rejects_invalid_tool_fields() -> None:
         Message(role="tool", content="tool output")
 
 
+def test_contracts_deep_copy_nested_json_payloads() -> None:
+    arguments = {
+        "path": "README.md",
+        "options": {"lines": [1, 2, 3]},
+    }
+    message_metadata = {"turn": {"id": "turn_1"}}
+    input_schema = {
+        "type": "object",
+        "properties": {"path": {"type": "string", "examples": ["README.md"]}},
+    }
+    tool_metadata = {"ui": {"group": "fs"}}
+    result_metadata = {
+        "interrupt": {"kind": "question", "prompt": "Pick a file"},
+        "extra": {"nested": ["a"]},
+    }
+    request_metadata = {"request": {"id": "req_1"}}
+    response_metadata = {"provider": {"model": "fake"}}
+    interrupt_details = {"context": {"paths": ["README.md"]}}
+
+    tool_call = ToolCall(id="call_1", name="Read", arguments=arguments)
+    message = Message(role="assistant", metadata=message_metadata)
+    tool_definition = ToolDefinition(
+        name="Read",
+        description="Read a file from the workspace.",
+        input_schema=input_schema,
+        approval_category="read_only",
+        metadata=tool_metadata,
+    )
+    tool_result = ToolResult(
+        output="Need clarification.",
+        metadata=result_metadata,
+        interrupt=True,
+    )
+    model_tool = ModelToolDefinition(
+        name="Read",
+        description="Read a file from the workspace.",
+        input_schema=input_schema,
+        metadata=tool_metadata,
+    )
+    model_request = ModelRequest(
+        messages=[Message(role="user", content="read it")],
+        tools=[model_tool],
+        metadata=request_metadata,
+    )
+    model_response = ModelResponse(
+        message=Message(role="assistant", content="done"),
+        finish_reason="stop",
+        metadata=response_metadata,
+    )
+    interrupt = InterruptMetadata(
+        kind="question",
+        prompt="Pick a file",
+        details=interrupt_details,
+    )
+
+    arguments["options"]["lines"].append(4)
+    message_metadata["turn"]["id"] = "changed"
+    input_schema["properties"]["path"]["examples"].append("other.md")
+    tool_metadata["ui"]["group"] = "changed"
+    result_metadata["extra"]["nested"].append("b")
+    result_metadata["interrupt"]["prompt"] = "Changed"
+    request_metadata["request"]["id"] = "changed"
+    response_metadata["provider"]["model"] = "changed"
+    interrupt_details["context"]["paths"].append("other.md")
+
+    assert tool_call.arguments["options"]["lines"] == [1, 2, 3]
+    assert message.metadata["turn"]["id"] == "turn_1"
+    assert tool_definition.input_schema["properties"]["path"]["examples"] == ["README.md"]
+    assert tool_definition.metadata["ui"]["group"] == "fs"
+    assert tool_result.metadata == {
+        "interrupt": {"kind": "question", "prompt": "Pick a file"},
+        "extra": {"nested": ["a"]},
+    }
+    assert model_tool.input_schema["properties"]["path"]["examples"] == ["README.md"]
+    assert model_tool.metadata["ui"]["group"] == "fs"
+    assert model_request.metadata["request"]["id"] == "req_1"
+    assert model_response.metadata["provider"]["model"] == "fake"
+    assert interrupt.details["context"]["paths"] == ["README.md"]
+
+
 def test_tool_result_interrupt_metadata_is_normalized() -> None:
     interrupt = InterruptMetadata(
         kind="question",

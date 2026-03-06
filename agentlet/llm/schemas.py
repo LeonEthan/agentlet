@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
 
 from agentlet.core.messages import Message
-from agentlet.core.types import JSONObject, TokenUsage
+from agentlet.core.types import JSONObject, TokenUsage, deep_copy_json_object
 
 if TYPE_CHECKING:
     from agentlet.tools.base import ToolDefinition
@@ -29,16 +29,16 @@ class ModelToolDefinition:
             raise ValueError("tool name must not be empty")
         if not self.description:
             raise ValueError("tool description must not be empty")
-        object.__setattr__(self, "input_schema", dict(self.input_schema))
-        object.__setattr__(self, "metadata", dict(self.metadata))
+        object.__setattr__(self, "input_schema", deep_copy_json_object(self.input_schema))
+        object.__setattr__(self, "metadata", deep_copy_json_object(self.metadata))
 
     @classmethod
     def from_dict(cls, payload: JSONObject) -> "ModelToolDefinition":
         return cls(
             name=str(payload["name"]),
             description=str(payload["description"]),
-            input_schema=dict(payload.get("input_schema", {})),
-            metadata=dict(payload.get("metadata", {})),
+            input_schema=deep_copy_json_object(payload.get("input_schema", {})),
+            metadata=deep_copy_json_object(payload.get("metadata", {})),
         )
 
     @classmethod
@@ -89,7 +89,7 @@ class ModelRequest:
     def __post_init__(self) -> None:
         object.__setattr__(self, "messages", tuple(self.messages))
         object.__setattr__(self, "tools", tuple(self.tools))
-        object.__setattr__(self, "metadata", dict(self.metadata))
+        object.__setattr__(self, "metadata", deep_copy_json_object(self.metadata))
         if not self.messages:
             raise ValueError("messages must not be empty")
         if self.tool_choice is None:
@@ -119,7 +119,7 @@ class ModelRequest:
                 if payload.get("tool_choice") is not None
                 else None
             ),
-            metadata=dict(payload.get("metadata", {})),
+            metadata=deep_copy_json_object(payload.get("metadata", {})),
         )
 
 
@@ -137,7 +137,7 @@ class ModelResponse:
             raise ValueError("model responses must contain an assistant message")
         if not self.finish_reason:
             raise ValueError("finish_reason must not be empty")
-        object.__setattr__(self, "metadata", dict(self.metadata))
+        object.__setattr__(self, "metadata", deep_copy_json_object(self.metadata))
 
     @classmethod
     def from_dict(cls, payload: JSONObject) -> "ModelResponse":
@@ -150,5 +150,5 @@ class ModelResponse:
                 if usage_payload is not None
                 else None
             ),
-            metadata=dict(payload.get("metadata", {})),
+            metadata=deep_copy_json_object(payload.get("metadata", {})),
         )

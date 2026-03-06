@@ -9,6 +9,28 @@ JSONValue = JSONScalar | list["JSONValue"] | dict[str, "JSONValue"]
 JSONObject = dict[str, JSONValue]
 
 
+def deep_copy_json(value: JSONValue) -> JSONValue:
+    """Recursively copy JSON-like values while preserving plain dict/list shapes."""
+
+    if isinstance(value, dict):
+        return {
+            str(key): deep_copy_json(nested_value)
+            for key, nested_value in value.items()
+        }
+    if isinstance(value, list):
+        return [deep_copy_json(item) for item in value]
+    return value
+
+
+def deep_copy_json_object(payload: JSONObject) -> JSONObject:
+    """Recursively copy a JSON-like mapping."""
+
+    copied = deep_copy_json(payload)
+    if not isinstance(copied, dict):
+        raise ValueError("payload must be a mapping")
+    return copied
+
+
 @dataclass(frozen=True, slots=True)
 class TokenUsage:
     """Provider-agnostic token accounting for one model response."""
@@ -82,7 +104,7 @@ class InterruptMetadata:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "options", tuple(self.options))
-        object.__setattr__(self, "details", dict(self.details))
+        object.__setattr__(self, "details", deep_copy_json_object(self.details))
 
     def as_dict(self) -> JSONObject:
         payload: JSONObject = {
@@ -95,7 +117,7 @@ class InterruptMetadata:
         if self.options:
             payload["options"] = [option.as_dict() for option in self.options]
         if self.details:
-            payload["details"] = dict(self.details)
+            payload["details"] = deep_copy_json_object(self.details)
         return payload
 
     @classmethod
@@ -121,5 +143,5 @@ class InterruptMetadata:
                 for option_payload in options_payload
             ),
             allow_free_text=bool(payload.get("allow_free_text", False)),
-            details=dict(details_payload),
+            details=deep_copy_json_object(details_payload),
         )

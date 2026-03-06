@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
-from agentlet.core.types import JSONObject
+from agentlet.core.types import JSONObject, deep_copy_json_object
 
 MessageRole = Literal["system", "user", "assistant", "tool"]
 VALID_MESSAGE_ROLES = {"system", "user", "assistant", "tool"}
@@ -25,16 +25,16 @@ class ToolCall:
             raise ValueError("tool call id must not be empty")
         if not self.name:
             raise ValueError("tool call name must not be empty")
-        object.__setattr__(self, "arguments", dict(self.arguments))
-        object.__setattr__(self, "metadata", dict(self.metadata))
+        object.__setattr__(self, "arguments", deep_copy_json_object(self.arguments))
+        object.__setattr__(self, "metadata", deep_copy_json_object(self.metadata))
 
     @classmethod
     def from_dict(cls, payload: JSONObject) -> "ToolCall":
         return cls(
             id=str(payload["id"]),
             name=str(payload["name"]),
-            arguments=dict(payload.get("arguments", {})),
-            metadata=dict(payload.get("metadata", {})),
+            arguments=deep_copy_json_object(payload.get("arguments", {})),
+            metadata=deep_copy_json_object(payload.get("metadata", {})),
         )
 
 
@@ -53,7 +53,7 @@ class Message:
         if self.role not in VALID_MESSAGE_ROLES:
             raise ValueError(f"unsupported message role: {self.role}")
         object.__setattr__(self, "tool_calls", tuple(self.tool_calls))
-        object.__setattr__(self, "metadata", dict(self.metadata))
+        object.__setattr__(self, "metadata", deep_copy_json_object(self.metadata))
         if self.tool_calls and self.role != "assistant":
             raise ValueError("only assistant messages may include tool calls")
         if self.tool_call_id is not None and self.role != "tool":
@@ -73,5 +73,5 @@ class Message:
             name=payload.get("name"),
             tool_calls=tool_calls,
             tool_call_id=payload.get("tool_call_id"),
-            metadata=dict(payload.get("metadata", {})),
+            metadata=deep_copy_json_object(payload.get("metadata", {})),
         )
