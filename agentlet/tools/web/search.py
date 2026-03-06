@@ -1,0 +1,2 @@
+"""Web search tool placeholders."""
+
