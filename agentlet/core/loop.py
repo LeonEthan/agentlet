@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from math import isfinite
 from typing import Protocol
+from uuid import uuid4
 
 from agentlet.core.approvals import ApprovalPolicy
 from agentlet.core.context import ContextBuilder, CurrentTaskState, PendingInterruptContext
@@ -13,7 +14,7 @@ from agentlet.core.types import InterruptMetadata, JSONObject, TokenUsage, deep_
 from agentlet.llm.base import ModelClient
 from agentlet.llm.schemas import ModelRequest, ModelToolDefinition, ToolChoice
 from agentlet.memory.session_store import SessionRecord
-from agentlet.runtime.events import ApprovalRequest, ResumeRequest
+from agentlet.runtime.events import ApprovalRequest, ApprovalResponse, ResumeRequest
 from agentlet.tools.base import Tool, ToolDefinition, ToolResult
 
 
@@ -131,6 +132,7 @@ class AgentLoop:
         ]
         durable_memory = self.memory_store.read() if self.memory_store is not None else ""
         pending_interrupt = _pending_interrupt_from_resume(resume)
+        pending_approval = _approval_response_from_resume(resume)
 
         working_messages = list(
             self.context_builder.build(
@@ -177,13 +179,36 @@ class AgentLoop:
                     new_messages.append(tool_message)
                     continue
 
-                approval_outcome = self._approval_outcome_for_tool_call(
+                approval_resolution = self._resolve_approval_for_tool_call(
                     tool_call=tool_call,
                     assistant_message=assistant_message,
+                    pending_approval=pending_approval,
+                    existing_records=existing_records,
                 )
-                if approval_outcome is not None:
-                    self._persist_messages(existing_records, new_messages)
-                    return approval_outcome
+                if isinstance(approval_resolution, ApprovalRequiredTurn):
+                    self._persist_messages(
+                        existing_records,
+                        new_messages,
+                        extra_records=[
+                            SessionRecord(
+                                record_id=approval_resolution.request.request_id,
+                                kind="approval_request",
+                                payload=approval_resolution.request.as_dict(),
+                            )
+                        ],
+                    )
+                    return approval_resolution
+                if isinstance(approval_resolution, ToolResult):
+                    tool_message = _tool_message_from_result(
+                        tool_call,
+                        approval_resolution,
+                    )
+                    working_messages.append(tool_message)
+                    new_messages.append(tool_message)
+                    pending_approval = None
+                    continue
+                if approval_resolution == "approved":
+                    pending_approval = None
 
                 tool_message, interrupted_turn = self._execute_tool_call(
                     tool_call=tool_call,
@@ -211,12 +236,14 @@ class AgentLoop:
             tool_choice=self.tool_choice,
         )
 
-    def _approval_outcome_for_tool_call(
+    def _resolve_approval_for_tool_call(
         self,
         *,
         tool_call: ToolCall,
         assistant_message: Message,
-    ) -> ApprovalRequiredTurn | None:
+        pending_approval: ApprovalResponse | None,
+        existing_records: list[SessionRecord],
+    ) -> ApprovalRequiredTurn | ToolResult | str | None:
         if self.registry.get(tool_call.name) is None:
             return None
         definition = self.registry.definition(tool_call.name)
@@ -224,7 +251,30 @@ class AgentLoop:
         if not decision.requires_approval:
             return None
 
-        request_id = _approval_request_id(tool_call)
+        if pending_approval is not None:
+            matched_request = _approval_request_for_response(
+                pending_approval,
+                existing_records,
+            )
+            if (
+                matched_request is not None
+                and _approval_request_matches_tool_call(matched_request, tool_call)
+            ):
+                if pending_approval.decision == "approved":
+                    return "approved"
+                return ToolResult.error(
+                    output=(
+                        f"Tool `{tool_call.name}` was not executed because approval "
+                        "was rejected."
+                    ),
+                    metadata={
+                        "tool_name": tool_call.name,
+                        "error_type": "ApprovalRejected",
+                        "request_id": pending_approval.request_id,
+                    },
+                )
+
+        request_id = _approval_request_id()
         prompt = (
             f"Allow `{tool_call.name}` to run with the proposed arguments?"
         )
@@ -316,8 +366,9 @@ class AgentLoop:
         self,
         existing_records: list[SessionRecord],
         messages: list[Message],
+        extra_records: list[SessionRecord] | None = None,
     ) -> None:
-        if not messages:
+        if not messages and not extra_records:
             return
 
         starting_index = len(existing_records)
@@ -329,6 +380,8 @@ class AgentLoop:
             )
             for index, message in enumerate(messages)
         ]
+        if extra_records:
+            records.extend(extra_records)
         self.session_store.append_many(records)
 
 
@@ -400,6 +453,14 @@ def _pending_interrupt_from_resume(
     )
 
 
+def _approval_response_from_resume(
+    resume: ResumeRequest | None,
+) -> ApprovalResponse | None:
+    if resume is None or resume.kind != "approval":
+        return None
+    return resume.payload
+
+
 def _new_input_messages(
     *,
     pending_interrupt: PendingInterruptContext | None,
@@ -427,8 +488,32 @@ def _current_task_message(
     return Message(role="user", content=current_task)
 
 
-def _approval_request_id(tool_call: ToolCall) -> str:
-    return f"approval:{tool_call.id}"
+def _approval_request_id() -> str:
+    return f"approval:{uuid4().hex}"
+
+
+def _approval_request_for_response(
+    response: ApprovalResponse,
+    existing_records: list[SessionRecord],
+) -> ApprovalRequest | None:
+    for record in existing_records:
+        if record.kind != "approval_request":
+            continue
+        payload_request_id = record.payload.get("request_id")
+        if payload_request_id != response.request_id:
+            continue
+        return ApprovalRequest.from_dict(record.payload)
+    return None
+
+
+def _approval_request_matches_tool_call(
+    request: ApprovalRequest,
+    tool_call: ToolCall,
+) -> bool:
+    return (
+        request.tool_name == tool_call.name
+        and request.arguments == tool_call.arguments
+    )
 
 
 def _validate_arguments_against_schema(
