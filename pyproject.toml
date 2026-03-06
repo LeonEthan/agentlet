@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentlet"
+version = "0.1.0"
+description = "A small Python agent framework scaffold for coding and research workflows."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+authors = [
+  { name = "agentlet contributors" },
+]
+dependencies = []
+
+[project.scripts]
+agentlet = "apps.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8,<9"]
+
+[tool.setuptools]
+include-package-data = false
+
+[tool.setuptools.packages.find]
+include = ["agentlet*", "apps*"]
