@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from pathlib import Path
+
+import pytest
+
 from agentlet.tools.fs.edit import EditTool
 from agentlet.tools.fs.write import WriteTool
 
@@ -49,6 +53,19 @@ def test_write_allows_overwrite_with_flag(tmp_path) -> None:
         "created": False,
     }
     assert target.read_text(encoding="utf-8") == "updated\n"
+
+
+def test_write_returns_error_when_parent_component_is_a_file(tmp_path) -> None:
+    tool = WriteTool(workspace_root=tmp_path)
+    target = tmp_path / "README.md"
+    target.write_text("existing\n", encoding="utf-8")
+
+    result = tool.execute({"path": "README.md/child.txt", "content": "new\n"})
+
+    assert result.is_error is True
+    assert result.output.startswith("Failed to write file: README.md/child.txt:")
+    assert result.metadata == {"path": "README.md/child.txt"}
+    assert target.read_text(encoding="utf-8") == "existing\n"
 
 
 def test_edit_replaces_exact_match(tmp_path) -> None:
@@ -126,3 +143,48 @@ def test_edit_rejects_missing_file(tmp_path) -> None:
     assert result.is_error is True
     assert result.output == "Cannot edit missing file: missing.py"
     assert result.metadata == {"path": "missing.py"}
+
+
+def test_edit_returns_error_for_non_utf8_file(tmp_path) -> None:
+    tool = EditTool(workspace_root=tmp_path)
+    target = tmp_path / "image.bin"
+    target.write_bytes(b"\xff\xfe\x00\x01")
+
+    result = tool.execute(
+        {
+            "path": "image.bin",
+            "old_text": "before",
+            "new_text": "after",
+        }
+    )
+
+    assert result.is_error is True
+    assert result.output == "Cannot edit non-UTF-8 file: image.bin"
+    assert result.metadata == {"path": "image.bin"}
+
+
+def test_edit_returns_error_when_write_fails(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    tool = EditTool(workspace_root=tmp_path)
+    target = tmp_path / "app.py"
+    target.write_text("print('hello')\n", encoding="utf-8")
+    original_write_text = Path.write_text
+
+    def fake_write_text(self: Path, *args: object, **kwargs: object) -> int:
+        if self == target:
+            raise PermissionError("permission denied")
+        return original_write_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", fake_write_text)
+
+    result = tool.execute(
+        {
+            "path": "app.py",
+            "old_text": "print('hello')",
+            "new_text": "print('goodbye')",
+        }
+    )
+
+    assert result.is_error is True
+    assert result.output.startswith("Failed to write edited file: app.py:")
+    assert result.metadata == {"path": "app.py"}
+    assert target.read_text(encoding="utf-8") == "print('hello')\n"

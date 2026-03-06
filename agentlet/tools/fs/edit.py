@@ -70,7 +70,18 @@ class EditTool:
                 metadata={"path": _display_path(self.workspace_root, target_path)},
             )
 
-        original_content = target_path.read_text(encoding="utf-8")
+        try:
+            original_content = target_path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            return ToolResult.error(
+                f"Cannot edit non-UTF-8 file: {path_value}",
+                metadata={"path": _display_path(self.workspace_root, target_path)},
+            )
+        except OSError as exc:
+            return ToolResult.error(
+                f"Failed to read file for edit: {path_value}: {exc}",
+                metadata={"path": _display_path(self.workspace_root, target_path)},
+            )
         match_count = original_content.count(old_text)
         if match_count == 0:
             return ToolResult.error(
@@ -97,7 +108,13 @@ class EditTool:
             else original_content.replace(old_text, new_text, 1)
         )
         replacement_count = match_count if replace_all else 1
-        target_path.write_text(updated_content, encoding="utf-8")
+        try:
+            target_path.write_text(updated_content, encoding="utf-8")
+        except OSError as exc:
+            return ToolResult.error(
+                f"Failed to write edited file: {path_value}: {exc}",
+                metadata={"path": _display_path(self.workspace_root, target_path)},
+            )
 
         return ToolResult(
             output=(
