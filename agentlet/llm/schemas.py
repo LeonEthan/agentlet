@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from agentlet.tools.base import ToolDefinition
 
 ToolChoiceMode = Literal["auto", "none", "required", "tool"]
+VALID_TOOL_CHOICE_MODES = {"auto", "none", "required", "tool"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,6 +62,8 @@ class ToolChoice:
     tool_name: str | None = None
 
     def __post_init__(self) -> None:
+        if self.mode not in VALID_TOOL_CHOICE_MODES:
+            raise ValueError(f"unsupported tool choice mode: {self.mode}")
         if self.mode == "tool" and not self.tool_name:
             raise ValueError("tool_name is required when mode='tool'")
         if self.mode != "tool" and self.tool_name is not None:

@@ -56,6 +56,18 @@ class InterruptOption:
             payload["description"] = self.description
         return payload
 
+    @classmethod
+    def from_dict(cls, payload: JSONObject) -> "InterruptOption":
+        return cls(
+            value=str(payload["value"]),
+            label=str(payload["label"]),
+            description=(
+                str(payload["description"])
+                if payload.get("description") is not None
+                else None
+            ),
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class InterruptMetadata:
@@ -85,3 +97,29 @@ class InterruptMetadata:
         if self.details:
             payload["details"] = dict(self.details)
         return payload
+
+    @classmethod
+    def from_dict(cls, payload: JSONObject) -> "InterruptMetadata":
+        details_payload = payload.get("details", {})
+        if not isinstance(details_payload, dict):
+            raise ValueError("interrupt details must be a mapping")
+
+        options_payload = payload.get("options", ())
+        if not isinstance(options_payload, list | tuple):
+            raise ValueError("interrupt options must be a list")
+
+        return cls(
+            kind=str(payload["kind"]),
+            prompt=str(payload["prompt"]),
+            request_id=(
+                str(payload["request_id"])
+                if payload.get("request_id") is not None
+                else None
+            ),
+            options=tuple(
+                InterruptOption.from_dict(option_payload)
+                for option_payload in options_payload
+            ),
+            allow_free_text=bool(payload.get("allow_free_text", False)),
+            details=dict(details_payload),
+        )

@@ -29,6 +29,16 @@ def _read_definition() -> ToolDefinition:
     )
 
 
+def test_tool_definition_rejects_invalid_approval_category() -> None:
+    with pytest.raises(ValueError, match="unsupported approval category"):
+        ToolDefinition(
+            name="Read",
+            description="Read a file from the workspace.",
+            input_schema={"type": "object"},
+            approval_category="invalid",  # type: ignore[arg-type]
+        )
+
+
 def test_message_contract_serializes_tool_calls() -> None:
     message = Message(
         role="assistant",
@@ -130,6 +140,26 @@ def test_tool_result_interrupt_metadata_is_normalized() -> None:
             metadata={"interrupt": {"kind": "question", "prompt": "x"}},
         )
 
+    with pytest.raises(ValueError, match="must be a mapping"):
+        ToolResult(
+            output="Need clarification before proceeding.",
+            interrupt=True,
+            metadata={"interrupt": "question"},  # type: ignore[arg-type]
+        )
+
+    with pytest.raises(ValueError, match="interrupt options must be a list"):
+        ToolResult(
+            output="Need clarification before proceeding.",
+            interrupt=True,
+            metadata={
+                "interrupt": {
+                    "kind": "question",
+                    "prompt": "Which file should I edit?",
+                    "options": "bad-options",
+                }
+            },
+        )
+
 
 def test_model_request_validates_tool_choice_against_available_tools() -> None:
     definition = ModelToolDefinition.from_tool_definition(_read_definition())
@@ -148,6 +178,9 @@ def test_model_request_validates_tool_choice_against_available_tools() -> None:
             tools=[definition],
             tool_choice=ToolChoice(mode="tool", tool_name="Write"),
         )
+
+    with pytest.raises(ValueError, match="unsupported tool choice mode"):
+        ToolChoice(mode="invalid")  # type: ignore[arg-type]
 
 
 def test_model_request_and_response_round_trip_without_approval_policy() -> None:

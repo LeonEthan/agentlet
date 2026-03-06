@@ -13,6 +13,12 @@ ApprovalCategory = Literal[
     "exec",
     "external_or_interrupt",
 ]
+VALID_APPROVAL_CATEGORIES = {
+    "read_only",
+    "mutating",
+    "exec",
+    "external_or_interrupt",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,6 +36,10 @@ class ToolDefinition:
             raise ValueError("tool name must not be empty")
         if not self.description:
             raise ValueError("tool description must not be empty")
+        if self.approval_category not in VALID_APPROVAL_CATEGORIES:
+            raise ValueError(
+                f"unsupported approval category: {self.approval_category}"
+            )
         object.__setattr__(self, "input_schema", dict(self.input_schema))
         object.__setattr__(self, "metadata", dict(self.metadata))
 
@@ -51,6 +61,10 @@ class ToolResult:
             raise ValueError("interrupt results must include metadata['interrupt']")
         if not self.interrupt and interrupt_payload is not None:
             raise ValueError("metadata['interrupt'] requires interrupt=True")
+        if interrupt_payload is not None:
+            if not isinstance(interrupt_payload, dict):
+                raise ValueError("metadata['interrupt'] must be a mapping")
+            InterruptMetadata.from_dict(interrupt_payload)
 
     @classmethod
     def error(
