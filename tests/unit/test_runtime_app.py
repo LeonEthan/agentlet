@@ -3,7 +3,7 @@ from __future__ import annotations
 from agentlet.core.approvals import ApprovalPolicy
 from agentlet.core.loop import CompletedTurn
 from agentlet.core.messages import Message, ToolCall
-from agentlet.core.types import InterruptMetadata
+from agentlet.core.types import InterruptMetadata, InterruptOption
 from agentlet.llm.schemas import ModelRequest, ModelResponse
 from agentlet.runtime.app import build_runtime_app
 from agentlet.runtime.events import (
@@ -118,7 +118,7 @@ def test_build_runtime_app_assembles_default_components_and_runs_minimal_session
     assert app.loop.memory_store.path == (tmp_path / ".agentlet" / "memory.md")
     assert tuple(
         definition.name for definition in app.loop.registry.definitions()
-    ) == ("Read", "Write", "Edit", "Bash", "Glob", "Grep")
+    ) == ("Read", "Write", "Edit", "Bash", "Glob", "Grep", "AskUserQuestion")
     outcome = app.run_turn(current_task="Say ready.")
     assert isinstance(outcome, CompletedTurn)
     assert outcome.message.content == "Ready."
@@ -300,6 +300,96 @@ def test_runtime_app_resumes_question_interrupts_through_user_io(tmp_path) -> No
         )
     ]
     assert [event.kind for event in user_io.events] == [
+        "question_interrupted",
+        "resumed",
+    ]
+    assert outcome.message.content == "Use README.md."
+
+
+def test_default_runtime_registry_supports_question_interrupt_flow(tmp_path) -> None:
+    model = FakeModelClient(
+        [
+            ModelResponse(
+                message=Message(
+                    role="assistant",
+                    content="I need clarification.",
+                    tool_calls=(
+                        ToolCall(
+                            id="call_question",
+                            name="AskUserQuestion",
+                            arguments={
+                                "prompt": "Which file should I edit?",
+                                "request_id": "question_1",
+                                "options": [
+                                    {"value": "readme", "label": "README.md"},
+                                    {"value": "arch", "label": "docs/ARCHITECTURE.md"},
+                                ],
+                            },
+                        ),
+                    ),
+                ),
+                finish_reason="tool_calls",
+            ),
+            ModelResponse(
+                message=Message(
+                    role="assistant",
+                    content="Proceeding with the question.",
+                    tool_calls=(
+                        ToolCall(
+                            id="call_question",
+                            name="AskUserQuestion",
+                            arguments={
+                                "prompt": "Which file should I edit?",
+                                "request_id": "question_1",
+                                "options": [
+                                    {"value": "readme", "label": "README.md"},
+                                    {"value": "arch", "label": "docs/ARCHITECTURE.md"},
+                                ],
+                            },
+                        ),
+                    ),
+                ),
+                finish_reason="tool_calls",
+            ),
+            ModelResponse(
+                message=Message(role="assistant", content="Use README.md."),
+                finish_reason="stop",
+            ),
+        ]
+    )
+    user_io = FakeUserIO(
+        approval_decisions=["approved"],
+        question_responses=[
+            UserQuestionResponse(
+                request_id="question_1",
+                selected_option="readme",
+            )
+        ]
+    )
+
+    app = build_runtime_app(
+        model=model,
+        user_io=user_io,
+        workspace_root=tmp_path,
+    )
+
+    outcome = app.run_turn(current_task="Continue.")
+
+    assert isinstance(outcome, CompletedTurn)
+    assert user_io.question_requests == [
+        UserQuestionRequest(
+            request_id="question_1",
+            prompt="Which file should I edit?",
+            options=(
+                InterruptOption(value="readme", label="README.md"),
+                InterruptOption(value="arch", label="docs/ARCHITECTURE.md"),
+            ),
+            details={"source_tool": "AskUserQuestion"},
+        )
+    ]
+    assert [event.kind for event in user_io.events] == [
+        "approval_requested",
+        "resumed",
         "question_interrupted",
         "resumed",
     ]

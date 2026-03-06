@@ -32,6 +32,7 @@ from agentlet.tools.fs.glob import GlobTool
 from agentlet.tools.fs.grep import GrepTool
 from agentlet.tools.fs.read import ReadTool
 from agentlet.tools.fs.write import WriteTool
+from agentlet.tools.interaction.ask_user_question import AskUserQuestionTool
 from agentlet.tools.registry import ToolRegistry
 
 
@@ -348,6 +349,7 @@ def build_default_registry(
             BashTool(workspace, default_timeout_seconds=bash_timeout_seconds),
             GlobTool(workspace),
             GrepTool(workspace),
+            AskUserQuestionTool(),
         ]
     )
 
