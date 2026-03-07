@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import asdict, dataclass, field
 from math import isfinite
 from typing import Protocol
@@ -139,7 +140,7 @@ class AgentLoop:
         durable_memory = self.memory_store.read() if self.memory_store is not None else ""
         pending_question = _question_response_from_resume(resume)
         if pending_question is not None:
-            request = _question_request_for_response(
+            request, already_consumed = _question_request_for_response(
                 pending_question,
                 session_history,
             )
@@ -147,6 +148,10 @@ class AgentLoop:
                 raise ValueError(
                     "question resume request_id does not match a persisted "
                     "AskUserQuestion interrupt"
+                )
+            if already_consumed:
+                raise ValueError(
+                    "question resume request_id has already been consumed"
                 )
             request.validate_response(pending_question)
         pending_interrupt = _pending_interrupt_from_resume(resume)
@@ -262,10 +267,11 @@ class AgentLoop:
         pending_approval: ApprovalResponse | None,
         existing_records: list[SessionRecord],
     ) -> ApprovalRequiredTurn | ToolResult | str | None:
-        if self.registry.get(tool_call.name) is None:
+        tool = self.registry.get(tool_call.name)
+        if tool is None:
             return None
-        definition = self.registry.definition(tool_call.name)
-        decision = self.approval_policy.decision_for_definition(definition)
+        definition = tool.definition
+        decision = self.approval_policy.decision_for_tool(tool)
         if not decision.requires_approval:
             return None
 
@@ -545,8 +551,12 @@ def _approval_request_matches_tool_call(
 def _question_request_for_response(
     response: UserQuestionResponse,
     session_history: list[SessionRecord],
-) -> UserQuestionRequest | None:
-    for record in reversed(session_history):
+) -> tuple[UserQuestionRequest | None, bool]:
+    matched_request: UserQuestionRequest | None = None
+    matched_index: int | None = None
+
+    for index in range(len(session_history) - 1, -1, -1):
+        record = session_history[index]
         try:
             message = Message.from_dict(record.payload)
         except (TypeError, ValueError):
@@ -564,8 +574,56 @@ def _question_request_for_response(
         if interrupt_payload.get("request_id") != response.request_id:
             continue
         interrupt = InterruptMetadata.from_dict(interrupt_payload)
-        return UserQuestionRequest.from_interrupt(interrupt)
-    return None
+        matched_request = UserQuestionRequest.from_interrupt(interrupt)
+        matched_index = index
+        break
+
+    if matched_request is None or matched_index is None:
+        return None, False
+
+    return (
+        matched_request,
+        _question_resume_already_consumed(
+            request_id=response.request_id,
+            session_history=session_history[matched_index + 1 :],
+        ),
+    )
+
+
+def _question_resume_already_consumed(
+    *,
+    request_id: str,
+    session_history: list[SessionRecord],
+) -> bool:
+    for record in session_history:
+        try:
+            message = Message.from_dict(record.payload)
+        except (TypeError, ValueError):
+            continue
+        if message.role != "user":
+            continue
+        payload = _resume_context_payload_from_message(message)
+        if payload is None:
+            continue
+        if payload.get("kind") != "question":
+            continue
+        if payload.get("request_id") == request_id:
+            return True
+    return False
+
+
+def _resume_context_payload_from_message(message: Message) -> JSONObject | None:
+    prefix = "Interrupt resume context:\n"
+    if not message.content.startswith(prefix):
+        return None
+    raw_payload = message.content[len(prefix) :]
+    try:
+        payload = json.loads(raw_payload)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    return deep_copy_json_object(payload)
 
 
 def _validate_arguments_against_schema(

@@ -974,6 +974,105 @@ def test_agent_loop_rejects_invalid_question_resume_selection() -> None:
         )
 
 
+def test_agent_loop_rejects_replayed_question_resume() -> None:
+    session_store = FakeSessionStore(
+        [
+            SessionRecord(
+                record_id="message_1",
+                kind="message",
+                payload=asdict(Message(role="user", content="Pick a file.")),
+            ),
+            SessionRecord(
+                record_id="message_2",
+                kind="message",
+                payload=asdict(
+                    Message(
+                        role="assistant",
+                        content="I need clarification.",
+                        tool_calls=(
+                            ToolCall(
+                                id="call_question",
+                                name="AskUserQuestion",
+                                arguments={"prompt": "Which file should I edit?"},
+                            ),
+                        ),
+                    )
+                ),
+            ),
+            SessionRecord(
+                record_id="message_3",
+                kind="message",
+                payload=asdict(
+                    Message(
+                        role="tool",
+                        name="AskUserQuestion",
+                        content="Need clarification before editing.",
+                        tool_call_id="call_question",
+                        metadata={
+                            "tool_name": "AskUserQuestion",
+                            "is_error": False,
+                            "result": {
+                                "interrupt": {
+                                    "kind": "question",
+                                    "prompt": "Which file should I edit?",
+                                    "request_id": "question_1",
+                                    "options": [
+                                        {"value": "readme", "label": "README.md"},
+                                        {
+                                            "value": "arch",
+                                            "label": "docs/ARCHITECTURE.md",
+                                        },
+                                    ],
+                                }
+                            },
+                        },
+                    )
+                ),
+            ),
+            SessionRecord(
+                record_id="message_4",
+                kind="message",
+                payload=asdict(
+                    Message(
+                        role="user",
+                        content=(
+                            "Interrupt resume context:\n"
+                            '{\n  "kind": "question",\n'
+                            '  "request_id": "question_1",\n'
+                            '  "selected_option": "readme"\n}'
+                        ),
+                    )
+                ),
+            ),
+            SessionRecord(
+                record_id="message_5",
+                kind="message",
+                payload=asdict(
+                    Message(role="assistant", content="I will edit README.md.")
+                ),
+            ),
+        ]
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="question resume request_id has already been consumed",
+    ):
+        AgentLoop(
+            model=FakeModelClient([]),
+            registry=FakeRegistry([]),
+            session_store=session_store,
+        ).run(
+            current_task="Continue the task.",
+            resume=ResumeRequest.from_question_response(
+                UserQuestionResponse(
+                    request_id="question_1",
+                    selected_option="readme",
+                )
+            ),
+        )
+
+
 def test_agent_loop_rejects_non_terminal_assistant_response_without_tool_calls() -> None:
     session_store = FakeSessionStore()
     model = FakeModelClient(

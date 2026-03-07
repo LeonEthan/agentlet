@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from agentlet.core.approvals import ApprovalPolicy
+from agentlet.tools.interaction.ask_user_question import AskUserQuestionTool
 from agentlet.tools.base import ToolDefinition, ToolResult
 from agentlet.tools.registry import (
     BUILT_IN_TOOL_NAMES,
@@ -88,7 +89,7 @@ def test_builtin_tool_names_and_categories_match_architecture() -> None:
         ("Write", "mutating", "require_approval"),
         ("Bash", "exec", "require_approval"),
         ("WebFetch", "external_or_interrupt", "require_approval"),
-        ("AskUserQuestion", "external_or_interrupt", "allow"),
+        ("AskUserQuestion", "external_or_interrupt", "require_approval"),
     ],
 )
 def test_approval_policy_decision_matrix(
@@ -128,15 +129,24 @@ def test_approval_policy_accepts_category_overrides() -> None:
     assert decision.requires_approval is False
 
 
-def test_approval_policy_always_allows_ask_user_question() -> None:
+def test_approval_policy_allows_trusted_builtin_ask_user_question() -> None:
     policy = ApprovalPolicy({"external_or_interrupt": "require_approval"})
 
-    decision = policy.decision_for_definition(
-        _definition("AskUserQuestion", "external_or_interrupt")
-    )
+    decision = policy.decision_for_tool(AskUserQuestionTool())
 
     assert decision.mode == "allow"
     assert decision.requires_approval is False
+
+
+def test_approval_policy_does_not_allow_custom_ask_user_question_by_name() -> None:
+    policy = ApprovalPolicy({"external_or_interrupt": "require_approval"})
+
+    decision = policy.decision_for_tool(
+        FakeTool(_definition("AskUserQuestion", "external_or_interrupt"))
+    )
+
+    assert decision.mode == "require_approval"
+    assert decision.requires_approval is True
 
 
 def test_approval_policy_rejects_invalid_override_mode() -> None:

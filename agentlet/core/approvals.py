@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Literal
 
+from agentlet.tools.interaction.ask_user_question import AskUserQuestionTool
 from agentlet.tools.base import (
     ApprovalCategory,
     Tool,
@@ -63,18 +64,30 @@ class ApprovalPolicy:
     ) -> ApprovalDecision:
         """Resolve a tool by name and return its approval decision."""
 
-        return self.decision_for_definition(registry.definition(tool_name))
+        return self.decision_for_tool(registry.resolve(tool_name))
 
     def decision_for_tool(self, tool: Tool) -> ApprovalDecision:
         """Return the approval decision for one tool instance."""
 
-        return self.decision_for_definition(tool.definition)
+        definition = tool.definition
+        _validate_approval_category(definition.approval_category)
+        mode = (
+            "allow"
+            if isinstance(tool, AskUserQuestionTool)
+            else self.mode_for_category(definition.approval_category)
+        )
+        return ApprovalDecision(
+            tool_name=definition.name,
+            approval_category=definition.approval_category,
+            mode=mode,
+            reason=_build_reason(definition.approval_category, mode),
+        )
 
     def decision_for_definition(self, definition: ToolDefinition) -> ApprovalDecision:
         """Return the approval decision for one tool definition."""
 
         _validate_approval_category(definition.approval_category)
-        mode = _mode_for_definition(definition, self._category_modes)
+        mode = self.mode_for_category(definition.approval_category)
         return ApprovalDecision(
             tool_name=definition.name,
             approval_category=definition.approval_category,
@@ -110,14 +123,3 @@ def _build_reason(category: ApprovalCategory, mode: ApprovalMode) -> str:
     if mode == "allow":
         return f"{category} tools may run without runtime approval."
     return f"{category} tools require runtime approval before execution."
-
-
-def _mode_for_definition(
-    definition: ToolDefinition,
-    category_modes: Mapping[ApprovalCategory, ApprovalMode],
-) -> ApprovalMode:
-    if definition.name == "AskUserQuestion":
-        return "allow"
-    mode = category_modes[definition.approval_category]
-    _validate_approval_mode(mode)
-    return mode

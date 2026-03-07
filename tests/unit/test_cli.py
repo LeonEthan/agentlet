@@ -14,6 +14,7 @@ from agentlet.runtime.events import (
     UserQuestionRequest,
     UserQuestionResponse,
 )
+from agentlet.tools.interaction.ask_user_question import AskUserQuestionTool
 from agentlet.tools.base import ToolDefinition, ToolResult
 
 
@@ -253,35 +254,6 @@ def test_cli_main_reports_pause_for_question_interrupt() -> None:
 def test_cli_main_runs_full_question_resume_session_with_options_and_free_text(
     tmp_path,
 ) -> None:
-    ask_tool = FakeTool(
-        ToolDefinition(
-            name="AskUserQuestion",
-            description="Ask the user a clarifying question.",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "prompt": {"type": "string"},
-                    "request_id": {"type": "string"},
-                },
-                "required": ["prompt", "request_id"],
-                "additionalProperties": True,
-            },
-            approval_category="external_or_interrupt",
-        ),
-        ToolResult.interrupt_result(
-            output="Need clarification.",
-            interrupt=InterruptMetadata(
-                kind="question",
-                prompt="Which file should I edit?",
-                request_id="question_1",
-                options=(
-                    InterruptOption(value="readme", label="README.md"),
-                    InterruptOption(value="arch", label="docs/ARCHITECTURE.md"),
-                ),
-                allow_free_text=True,
-            ),
-        ),
-    )
     model = FakeModelClient(
         [
             ModelResponse(
@@ -325,7 +297,7 @@ def test_cli_main_runs_full_question_resume_session_with_options_and_free_text(
             model=model,
             user_io=user_io,
             workspace_root=tmp_path,
-            registry=FakeRegistry([ask_tool]),
+            registry=FakeRegistry([AskUserQuestionTool()]),
             approval_policy=ApprovalPolicy(),
         ),
     )
