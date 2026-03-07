@@ -114,6 +114,15 @@ def test_web_search_falls_back_when_response_charset_is_unknown() -> None:
         search_module.urlopen = original_urlopen
 
 
+def test_web_search_preserves_encoded_reserved_characters_in_redirect_targets() -> None:
+    normalized = search_module._normalize_result_url(
+        "https://duckduckgo.com/l/?uddg="
+        "https%3A%2F%2Fexample.com%2Fa%253Fb%253D1%2526c%253D2"
+    )
+
+    assert normalized == "https://example.com/a%3Fb%3D1%26c%3D2"
+
+
 def test_web_fetch_extracts_html_title_and_text() -> None:
     response = _FetchedResponse(
         requested_url="https://example.com/post",
@@ -179,6 +188,18 @@ def test_web_fetch_rejects_non_http_urls() -> None:
 
     assert result.is_error is True
     assert result.output == "WebFetch url must be an absolute http or https URL."
+
+
+def test_web_fetch_rejects_urls_with_control_characters() -> None:
+    tool = WebFetchTool(fetch_url=lambda url, timeout: None)  # type: ignore[arg-type]
+
+    result = tool.execute({"url": "https://example.com/\nfoo"})
+
+    assert result.is_error is True
+    assert (
+        result.output
+        == "WebFetch url must not contain whitespace or control characters."
+    )
 
 
 def test_web_fetch_normalizes_transport_failures() -> None:

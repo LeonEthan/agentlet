@@ -250,10 +250,15 @@ def _require_http_url(arguments: JSONObject) -> str:
     value = arguments.get("url")
     if not isinstance(value, str) or not value.strip():
         raise ValueError("WebFetch requires a non-empty string 'url'.")
-    parsed = urlparse(value.strip())
+    normalized = value.strip()
+    if any(character.isspace() or ord(character) < 32 for character in normalized):
+        raise ValueError(
+            "WebFetch url must not contain whitespace or control characters."
+        )
+    parsed = urlparse(normalized)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise ValueError("WebFetch url must be an absolute http or https URL.")
-    return value.strip()
+    return normalized
 
 
 def _optional_positive_int(

@@ -5,7 +5,7 @@ from __future__ import annotations
 from html.parser import HTMLParser
 import re
 from typing import Callable
-from urllib.parse import parse_qs, quote_plus, unquote, urljoin, urlparse
+from urllib.parse import parse_qs, quote_plus, urljoin, urlparse
 from urllib.request import Request, urlopen
 
 from agentlet.core.types import JSONObject
@@ -232,7 +232,7 @@ def _normalize_result_url(raw_url: str) -> str:
     if parsed.netloc.endswith("duckduckgo.com") and parsed.path == "/l/":
         redirect_target = parse_qs(parsed.query).get("uddg")
         if redirect_target:
-            return unquote(redirect_target[0])
+            return redirect_target[0]
     return absolute_url
 
 
