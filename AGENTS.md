@@ -54,7 +54,7 @@ Respect these boundaries:
 - `Read` reads files only.
 - `Write` creates files and should be safe by default.
 - `Edit` performs precise updates to existing files.
-- `Bash` executes commands and must surface exit status.
+- `Bash` executes commands from a workspace-rooted cwd and must surface exit status.
 - `Glob` returns matching file paths.
 - `Grep` returns regex matches with location context.
 - `WebSearch` finds current external information.

@@ -1,18 +1,18 @@
 from __future__ import annotations
 
 from agentlet.core.approvals import ApprovalPolicy
+from agentlet.core.interrupts import (
+    ApprovalRequest,
+    ApprovalResponse,
+    UserQuestionRequest,
+    UserQuestionResponse,
+)
 from agentlet.core.loop import CompletedTurn
 from agentlet.core.messages import Message, ToolCall
 from agentlet.core.types import InterruptMetadata, InterruptOption
 from agentlet.llm.schemas import ModelRequest, ModelResponse
 from agentlet.runtime.app import build_runtime_app
-from agentlet.runtime.events import (
-    ApprovalRequest,
-    ApprovalResponse,
-    RuntimeEvent,
-    UserQuestionRequest,
-    UserQuestionResponse,
-)
+from agentlet.runtime.events import RuntimeEvent
 from agentlet.tools.base import ToolDefinition, ToolResult
 from agentlet.tools.registry import ToolRegistry
 

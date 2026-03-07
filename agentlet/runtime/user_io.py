@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 
-from agentlet.runtime.events import (
+from agentlet.core.interrupts import (
     ApprovalRequest,
     ApprovalResponse,
-    RuntimeEvent,
     UserQuestionRequest,
     UserQuestionResponse,
 )
+from agentlet.runtime.events import RuntimeEvent
 
 
 @runtime_checkable

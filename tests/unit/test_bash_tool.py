@@ -112,3 +112,21 @@ def test_bash_tool_returns_timeout_result(tmp_path: Path) -> None:
     assert isinstance(result.metadata["started_at"], float)
     assert isinstance(result.metadata["duration_seconds"], float)
     assert result.metadata["duration_seconds"] >= 0
+
+
+def test_bash_tool_rejects_cwd_outside_workspace_root(tmp_path: Path) -> None:
+    tool = BashTool(workspace_root=tmp_path)
+
+    result = tool.execute(
+        {
+            "command": "pwd",
+            "cwd": str(tmp_path.parent),
+        }
+    )
+
+    assert result.is_error is True
+    assert result.output == "Bash cwd must stay inside the workspace root."
+    assert result.metadata == {
+        "command": "pwd",
+        "cwd": str(tmp_path.parent),
+    }

@@ -10,18 +10,18 @@ from uuid import uuid4
 
 from agentlet.core.approvals import ApprovalPolicy
 from agentlet.core.context import ContextBuilder, CurrentTaskState, PendingInterruptContext
-from agentlet.core.messages import Message, ToolCall
-from agentlet.core.types import InterruptMetadata, JSONObject, TokenUsage, deep_copy_json_object
-from agentlet.llm.base import ModelClient
-from agentlet.llm.schemas import ModelRequest, ModelToolDefinition, ToolChoice
-from agentlet.memory.session_store import SessionRecord
-from agentlet.runtime.events import (
+from agentlet.core.interrupts import (
     ApprovalRequest,
     ApprovalResponse,
     ResumeRequest,
     UserQuestionRequest,
     UserQuestionResponse,
 )
+from agentlet.core.messages import Message, ToolCall
+from agentlet.core.types import InterruptMetadata, JSONObject, TokenUsage, deep_copy_json_object
+from agentlet.llm.base import ModelClient
+from agentlet.llm.schemas import ModelRequest, ModelToolDefinition, ToolChoice
+from agentlet.memory.session_store import SessionRecord
 from agentlet.tools.base import Tool, ToolDefinition, ToolResult
 
 

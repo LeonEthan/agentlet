@@ -7,15 +7,15 @@ import json
 import sys
 from typing import Protocol, Sequence, TextIO
 
-from agentlet.core.loop import CompletedTurn, InterruptedTurn
-from agentlet.runtime.app import RuntimeApp, build_default_runtime_app
-from agentlet.runtime.events import (
+from agentlet.core.interrupts import (
     ApprovalRequest,
     ApprovalResponse,
-    RuntimeEvent,
     UserQuestionRequest,
     UserQuestionResponse,
 )
+from agentlet.core.loop import CompletedTurn, InterruptedTurn
+from agentlet.runtime.app import RuntimeApp, build_default_runtime_app
+from agentlet.runtime.events import RuntimeEvent
 
 
 class RuntimeAppFactory(Protocol):

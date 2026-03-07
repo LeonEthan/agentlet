@@ -9,6 +9,7 @@ from typing import Mapping
 
 from agentlet.core.approvals import ApprovalPolicy
 from agentlet.core.context import ContextBuilder, CurrentTaskState
+from agentlet.core.interrupts import ResumeRequest, UserQuestionRequest
 from agentlet.core.loop import (
     AgentLoop,
     ApprovalRequiredTurn,
@@ -20,11 +21,7 @@ from agentlet.llm.base import ModelClient
 from agentlet.llm.openai_like import OpenAILikeModelClient, build_openai_like_transport
 from agentlet.llm.schemas import ToolChoice
 from agentlet.memory import MemoryStore, SessionStore
-from agentlet.runtime.events import (
-    ResumeRequest,
-    RuntimeEvent,
-    UserQuestionRequest,
-)
+from agentlet.runtime.events import RuntimeEvent
 from agentlet.runtime.user_io import UserIO
 from agentlet.tools.exec.bash import BashTool
 from agentlet.tools.fs.edit import EditTool

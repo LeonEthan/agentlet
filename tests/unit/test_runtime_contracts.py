@@ -2,15 +2,15 @@ from __future__ import annotations
 
 import pytest
 
-from agentlet.core.types import InterruptMetadata, InterruptOption
-from agentlet.runtime.events import (
+from agentlet.core.interrupts import (
     ApprovalRequest,
     ApprovalResponse,
     ResumeRequest,
-    RuntimeEvent,
     UserQuestionRequest,
     UserQuestionResponse,
 )
+from agentlet.core.types import InterruptMetadata, InterruptOption
+from agentlet.runtime.events import RuntimeEvent
 from agentlet.runtime.user_io import UserIO
 
 
