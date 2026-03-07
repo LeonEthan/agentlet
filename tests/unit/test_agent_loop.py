@@ -775,6 +775,109 @@ def test_agent_loop_rejects_replayed_approval_resume() -> None:
         )
 
 
+def test_agent_loop_accepts_valid_approval_resume_with_later_approval_records() -> None:
+    write_tool = FakeTool(
+        _definition("Write", "mutating"),
+        result=ToolResult(output="Created file: notes.md"),
+    )
+    session_store = FakeSessionStore(
+        [
+            SessionRecord(
+                record_id="message_1",
+                kind="message",
+                payload=asdict(Message(role="user", content="Create notes.md")),
+            ),
+            SessionRecord(
+                record_id="message_2",
+                kind="message",
+                payload=asdict(
+                    Message(
+                        role="assistant",
+                        content="I should write the file.",
+                        tool_calls=(
+                            ToolCall(
+                                id="call_0_0",
+                                name="Write",
+                                arguments={"path": "notes.md", "content": "hello"},
+                            ),
+                        ),
+                    )
+                ),
+            ),
+            SessionRecord(
+                record_id="approval:known",
+                kind="approval_request",
+                payload=ApprovalRequest(
+                    request_id="approval:known",
+                    tool_name="Write",
+                    approval_category="mutating",
+                    prompt="Allow `Write` to run with the proposed arguments?",
+                    arguments={"path": "notes.md", "content": "hello"},
+                    details={
+                        "tool_call_id": "call_0_0",
+                        "reason": "mutating tools require runtime approval before execution.",
+                    },
+                ).as_dict(),
+            ),
+            SessionRecord(
+                record_id="approval:later",
+                kind="approval_request",
+                payload=ApprovalRequest(
+                    request_id="approval:later",
+                    tool_name="Write",
+                    approval_category="mutating",
+                    prompt="Allow the later write?",
+                    arguments={"path": "later.md", "content": "later"},
+                    details={
+                        "tool_call_id": "call_1_0",
+                        "reason": "mutating tools require runtime approval before execution.",
+                    },
+                ).as_dict(),
+            ),
+        ]
+    )
+    model = FakeModelClient(
+        [
+            ModelResponse(
+                message=Message(
+                    role="assistant",
+                    content="Proceeding with the approved write.",
+                    tool_calls=(
+                        ToolCall(
+                            id="call_0_0",
+                            name="Write",
+                            arguments={"path": "notes.md", "content": "hello"},
+                        ),
+                    ),
+                ),
+                finish_reason="tool_calls",
+            ),
+            ModelResponse(
+                message=Message(role="assistant", content="The file is written."),
+                finish_reason="stop",
+            ),
+        ]
+    )
+
+    outcome = AgentLoop(
+        model=model,
+        registry=FakeRegistry([write_tool]),
+        session_store=session_store,
+    ).run(
+        current_task="Continue the task.",
+        resume=ResumeRequest.from_approval_response(
+            ApprovalResponse(
+                request_id="approval:known",
+                decision="approved",
+            )
+        ),
+    )
+
+    assert isinstance(outcome, CompletedTurn)
+    assert write_tool.executed_arguments == [{"path": "notes.md", "content": "hello"}]
+    assert outcome.message == Message(role="assistant", content="The file is written.")
+
+
 def test_agent_loop_generates_unique_approval_request_ids_across_turns() -> None:
     write_tool = FakeTool(_definition("Write", "mutating"))
     session_store = FakeSessionStore()

@@ -650,6 +650,8 @@ def _resume_already_consumed(
     records: list[SessionRecord],
 ) -> bool:
     for record in records:
+        if record.kind != "message":
+            continue
         try:
             message = Message.from_dict(record.payload)
         except (TypeError, ValueError):
