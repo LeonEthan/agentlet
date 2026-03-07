@@ -240,6 +240,10 @@ def build_runtime_app(
         memory_path=memory_path,
         instructions_path=instructions_path,
     )
+    session_store = SessionStore(paths.session_path)
+    session_store.ensure_exists()
+    memory_store = MemoryStore(paths.memory_path)
+    memory_store.ensure_exists()
     return RuntimeApp(
         loop=AgentLoop(
             model=model,
@@ -251,8 +255,8 @@ def build_runtime_app(
                     bash_timeout_seconds=bash_timeout_seconds,
                 )
             ),
-            session_store=SessionStore(paths.session_path),
-            memory_store=MemoryStore(paths.memory_path),
+            session_store=session_store,
+            memory_store=memory_store,
             context_builder=context_builder or ContextBuilder(),
             approval_policy=approval_policy or ApprovalPolicy(),
             tool_choice=tool_choice,

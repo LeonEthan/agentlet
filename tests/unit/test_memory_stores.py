@@ -78,6 +78,16 @@ def test_session_store_load_missing_file_returns_empty_list(tmp_path) -> None:
     assert store.load() == []
 
 
+def test_session_store_can_materialize_empty_jsonl_file(tmp_path) -> None:
+    store = SessionStore(tmp_path / "missing" / "session.jsonl")
+
+    store.ensure_exists()
+
+    assert store.path.exists()
+    assert store.path.read_text(encoding="utf-8") == ""
+    assert store.load() == []
+
+
 def test_session_store_rejects_invalid_append_input(tmp_path) -> None:
     store = SessionStore(tmp_path / "session.jsonl")
 
@@ -202,6 +212,15 @@ def test_memory_store_preserves_utf8_text(tmp_path) -> None:
 def test_memory_store_missing_file_returns_empty_string(tmp_path) -> None:
     store = MemoryStore(tmp_path / "memory" / "MEMORY.md")
 
+    assert store.read() == ""
+
+
+def test_memory_store_can_materialize_empty_markdown_file(tmp_path) -> None:
+    store = MemoryStore(tmp_path / "memory" / "MEMORY.md")
+
+    store.ensure_exists()
+
+    assert store.path.exists()
     assert store.read() == ""
 
 

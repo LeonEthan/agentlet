@@ -154,8 +154,22 @@ class AgentLoop:
                     "question resume request_id has already been consumed"
                 )
             request.validate_response(pending_question)
-        pending_interrupt = _pending_interrupt_from_resume(resume)
         pending_approval = _approval_response_from_resume(resume)
+        if pending_approval is not None:
+            request, already_consumed = _approval_request_for_response(
+                pending_approval,
+                existing_records,
+            )
+            if request is None:
+                raise ValueError(
+                    "approval resume request_id does not match a persisted "
+                    "approval request"
+                )
+            if already_consumed:
+                raise ValueError(
+                    "approval resume request_id has already been consumed"
+                )
+        pending_interrupt = _pending_interrupt_from_resume(resume)
 
         working_messages = list(
             self.context_builder.build(
@@ -276,7 +290,7 @@ class AgentLoop:
             return None
 
         if pending_approval is not None:
-            matched_request = _approval_request_for_response(
+            matched_request, _ = _approval_request_for_response(
                 pending_approval,
                 existing_records,
             )
@@ -527,15 +541,30 @@ def _approval_request_id() -> str:
 def _approval_request_for_response(
     response: ApprovalResponse,
     existing_records: list[SessionRecord],
-) -> ApprovalRequest | None:
-    for record in existing_records:
+) -> tuple[ApprovalRequest | None, bool]:
+    matched_request: ApprovalRequest | None = None
+    matched_index: int | None = None
+
+    for index, record in enumerate(existing_records):
         if record.kind != "approval_request":
             continue
         payload_request_id = record.payload.get("request_id")
         if payload_request_id != response.request_id:
             continue
-        return ApprovalRequest.from_dict(record.payload)
-    return None
+        matched_request = ApprovalRequest.from_dict(record.payload)
+        matched_index = index
+        break
+
+    if matched_request is None or matched_index is None:
+        return None, False
+
+    return (
+        matched_request,
+        _approval_resume_already_consumed(
+            request_id=response.request_id,
+            records=existing_records[matched_index + 1 :],
+        ),
+    )
 
 
 def _approval_request_matches_tool_call(
@@ -585,17 +614,42 @@ def _question_request_for_response(
         matched_request,
         _question_resume_already_consumed(
             request_id=response.request_id,
-            session_history=session_history[matched_index + 1 :],
+            records=session_history[matched_index + 1 :],
         ),
+    )
+
+
+def _approval_resume_already_consumed(
+    *,
+    request_id: str,
+    records: list[SessionRecord],
+) -> bool:
+    return _resume_already_consumed(
+        kind="approval",
+        request_id=request_id,
+        records=records,
     )
 
 
 def _question_resume_already_consumed(
     *,
     request_id: str,
-    session_history: list[SessionRecord],
+    records: list[SessionRecord],
 ) -> bool:
-    for record in session_history:
+    return _resume_already_consumed(
+        kind="question",
+        request_id=request_id,
+        records=records,
+    )
+
+
+def _resume_already_consumed(
+    *,
+    kind: str,
+    request_id: str,
+    records: list[SessionRecord],
+) -> bool:
+    for record in records:
         try:
             message = Message.from_dict(record.payload)
         except (TypeError, ValueError):
@@ -605,7 +659,7 @@ def _question_resume_already_consumed(
         payload = _resume_context_payload_from_message(message)
         if payload is None:
             continue
-        if payload.get("kind") != "question":
+        if payload.get("kind") != kind:
             continue
         if payload.get("request_id") == request_id:
             return True

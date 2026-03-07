@@ -18,6 +18,14 @@ class MemoryStore:
             return ""
         return self.path.read_text(encoding="utf-8")
 
+    def ensure_exists(self) -> None:
+        """Materialize the memory file so the runtime layout exists on disk."""
+
+        if self.path.exists():
+            return
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.write_text("", encoding="utf-8")
+
     def write(self, content: str) -> None:
         """Replace the durable memory file with new markdown content."""
 

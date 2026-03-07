@@ -16,7 +16,12 @@ from agentlet.core.messages import Message, ToolCall
 from agentlet.core.types import InterruptMetadata, InterruptOption
 from agentlet.llm.schemas import ModelRequest, ModelResponse
 from agentlet.memory import SessionRecord
-from agentlet.runtime.events import ApprovalResponse, ResumeRequest, UserQuestionResponse
+from agentlet.runtime.events import (
+    ApprovalRequest,
+    ApprovalResponse,
+    ResumeRequest,
+    UserQuestionResponse,
+)
 from agentlet.tools.base import ToolDefinition, ToolResult
 
 
@@ -662,6 +667,112 @@ def test_agent_loop_enforces_rejected_approval_after_resume() -> None:
             },
         },
     )
+
+
+def test_agent_loop_rejects_approval_resume_for_unknown_request_id() -> None:
+    session_store = FakeSessionStore()
+
+    with pytest.raises(
+        ValueError,
+        match="approval resume request_id does not match a persisted approval request",
+    ):
+        AgentLoop(
+            model=FakeModelClient([]),
+            registry=FakeRegistry([]),
+            session_store=session_store,
+        ).run(
+            current_task="Continue the task.",
+            resume=ResumeRequest.from_approval_response(
+                ApprovalResponse(
+                    request_id="approval:missing",
+                    decision="approved",
+                )
+            ),
+        )
+
+
+def test_agent_loop_rejects_replayed_approval_resume() -> None:
+    session_store = FakeSessionStore(
+        [
+            SessionRecord(
+                record_id="message_1",
+                kind="message",
+                payload=asdict(Message(role="user", content="Create notes.md")),
+            ),
+            SessionRecord(
+                record_id="message_2",
+                kind="message",
+                payload=asdict(
+                    Message(
+                        role="assistant",
+                        content="I should write the file.",
+                        tool_calls=(
+                            ToolCall(
+                                id="call_0_0",
+                                name="Write",
+                                arguments={"path": "notes.md", "content": "hello"},
+                            ),
+                        ),
+                    )
+                ),
+            ),
+            SessionRecord(
+                record_id="approval:known",
+                kind="approval_request",
+                payload=ApprovalRequest(
+                    request_id="approval:known",
+                    tool_name="Write",
+                    approval_category="mutating",
+                    prompt="Allow `Write` to run with the proposed arguments?",
+                    arguments={"path": "notes.md", "content": "hello"},
+                    details={
+                        "tool_call_id": "call_0_0",
+                        "reason": "mutating tools require runtime approval before execution.",
+                    },
+                ).as_dict(),
+            ),
+            SessionRecord(
+                record_id="message_3",
+                kind="message",
+                payload=asdict(
+                    Message(
+                        role="user",
+                        content=(
+                            "Interrupt resume context:\n"
+                            '{\n  "decision": "approved",\n'
+                            '  "kind": "approval",\n'
+                            '  "request_id": "approval:known"\n}'
+                        ),
+                    )
+                ),
+            ),
+            SessionRecord(
+                record_id="message_4",
+                kind="message",
+                payload=asdict(
+                    Message(role="assistant", content="The file is written.")
+                ),
+            ),
+        ]
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="approval resume request_id has already been consumed",
+    ):
+        AgentLoop(
+            model=FakeModelClient([]),
+            registry=FakeRegistry([]),
+            session_store=session_store,
+        ).run(
+            current_task="Continue the task.",
+            resume=ResumeRequest.from_approval_response(
+                ApprovalResponse(
+                    request_id="approval:known",
+                    decision="approved",
+                )
+            ),
+        )
 
 
 def test_agent_loop_generates_unique_approval_request_ids_across_turns() -> None:
