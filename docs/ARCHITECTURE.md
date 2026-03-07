@@ -124,6 +124,9 @@ Owns the core execution model.
   - Defines normalized message structures used across the framework.
 - `types.py`
   - Defines shared runtime dataclasses and protocols.
+  - Key types: `InterruptMetadata` (structured pause/resume state), `InterruptOption`
+    (structured choice for question interrupts), `TokenUsage` (provider-agnostic token
+    accounting), and `deep_copy_json_object` (immutable JSON value handling).
 - `approvals.py`
   - Defines tool approval and execution policy checks.
 
@@ -280,6 +283,8 @@ Interpretation:
   - Marks tool failure without throwing away the turn.
 - `interrupt`
   - Signals the runtime to pause and resume later.
+  - When `True`, metadata must include an `interrupt` field containing structured
+    interrupt metadata (e.g., `InterruptMetadata.as_dict()`).
 
 ## Approval Model
 
@@ -384,7 +389,7 @@ Session history is append-only and local.
 Pause and resume state is intentionally inspectable:
 
 - question interrupts are stored in the tool message metadata under
-  `result.interrupt`
+  `result.interrupt` (nested within the tool result metadata field)
 - approval resumes and question resumes are stored as explicit user messages with
   the prefix `Interrupt resume context:`
 
