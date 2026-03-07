@@ -2,15 +2,55 @@ from __future__ import annotations
 
 from io import StringIO
 
+from agentlet.core.approvals import ApprovalPolicy
 from apps.cli import TerminalUserIO, main
 from agentlet.core.loop import CompletedTurn, InterruptedTurn
 from agentlet.core.messages import Message, ToolCall
 from agentlet.core.types import InterruptMetadata, InterruptOption, TokenUsage
+from agentlet.llm.schemas import ModelRequest, ModelResponse
+from agentlet.runtime.app import build_runtime_app
 from agentlet.runtime.events import (
     ApprovalRequest,
     UserQuestionRequest,
     UserQuestionResponse,
 )
+from agentlet.tools.interaction.ask_user_question import AskUserQuestionTool
+from agentlet.tools.base import ToolDefinition, ToolResult
+
+
+class FakeModelClient:
+    def __init__(self, responses: list[ModelResponse]) -> None:
+        self._responses = list(responses)
+        self.requests: list[ModelRequest] = []
+
+    def complete(self, request: ModelRequest) -> ModelResponse:
+        self.requests.append(request)
+        if not self._responses:
+            raise AssertionError("no fake model responses remaining")
+        return self._responses.pop(0)
+
+
+class FakeTool:
+    def __init__(self, definition: ToolDefinition, result: ToolResult) -> None:
+        self.definition = definition
+        self.result = result
+
+    def execute(self, arguments: dict[str, object]) -> ToolResult:
+        return self.result
+
+
+class FakeRegistry:
+    def __init__(self, tools: list[FakeTool]) -> None:
+        self._tools = {tool.definition.name: tool for tool in tools}
+
+    def get(self, name: str) -> FakeTool | None:
+        return self._tools.get(name)
+
+    def definition(self, name: str) -> ToolDefinition:
+        return self._tools[name].definition
+
+    def definitions(self) -> tuple[ToolDefinition, ...]:
+        return tuple(tool.definition for tool in self._tools.values())
 
 
 class FakeRuntimeApp:
@@ -209,3 +249,71 @@ def test_cli_main_reports_pause_for_question_interrupt() -> None:
 
     assert exit_code == 0
     assert "Execution paused awaiting more user input." in stdout.getvalue()
+
+
+def test_cli_main_runs_full_question_resume_session_with_options_and_free_text(
+    tmp_path,
+) -> None:
+    model = FakeModelClient(
+        [
+            ModelResponse(
+                message=Message(
+                    role="assistant",
+                    content="I need clarification.",
+                    tool_calls=(
+                        ToolCall(
+                            id="call_question",
+                            name="AskUserQuestion",
+                            arguments={
+                                "prompt": "Which file should I edit?",
+                                "request_id": "question_1",
+                                "options": [
+                                    {"value": "readme", "label": "README.md"},
+                                    {"value": "arch", "label": "docs/ARCHITECTURE.md"},
+                                ],
+                                "allow_free_text": True,
+                            },
+                        ),
+                    ),
+                ),
+                finish_reason="tool_calls",
+            ),
+            ModelResponse(
+                message=Message(role="assistant", content="Use notes.md."),
+                finish_reason="stop",
+            ),
+        ]
+    )
+
+    stdout = StringIO()
+    stderr = StringIO()
+
+    exit_code = main(
+        ["Continue."],
+        stdin=StringIO("notes.md\n"),
+        stdout=stdout,
+        stderr=stderr,
+        app_factory=lambda args, user_io: build_runtime_app(
+            model=model,
+            user_io=user_io,
+            workspace_root=tmp_path,
+            registry=FakeRegistry([AskUserQuestionTool()]),
+            approval_policy=ApprovalPolicy(),
+        ),
+    )
+
+    assert exit_code == 0
+    assert stderr.getvalue() == ""
+    assert "Approval required" not in stdout.getvalue()
+    assert "Agent needs clarification before continuing." in stdout.getvalue()
+    assert "1. README.md [readme]" in stdout.getvalue()
+    assert "2. docs/ARCHITECTURE.md [arch]" in stdout.getvalue()
+    assert "Free-text answers are allowed." in stdout.getvalue()
+    assert stdout.getvalue().endswith("Use notes.md.\n")
+    assert len(model.requests) == 2
+    assert model.requests[1].messages[-1].content == (
+        "Interrupt resume context:\n"
+        '{\n  "free_text": "notes.md",\n'
+        '  "kind": "question",\n'
+        '  "request_id": "question_1"\n}'
+    )
