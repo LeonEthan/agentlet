@@ -825,6 +825,13 @@ def test_agent_loop_includes_resume_context_in_the_next_model_request() -> None:
                                     "kind": "question",
                                     "prompt": "Which file should I edit?",
                                     "request_id": "question_1",
+                                    "options": [
+                                        {"value": "readme", "label": "README.md"},
+                                        {
+                                            "value": "arch",
+                                            "label": "docs/ARCHITECTURE.md",
+                                        },
+                                    ],
                                 }
                             },
                         },
@@ -869,6 +876,102 @@ def test_agent_loop_includes_resume_context_in_the_next_model_request() -> None:
         ),
         Message(role="user", content="Continue the task."),
     )
+
+
+def test_agent_loop_rejects_question_resume_for_unknown_request_id() -> None:
+    session_store = FakeSessionStore()
+
+    with pytest.raises(
+        ValueError,
+        match="question resume request_id does not match a persisted AskUserQuestion interrupt",
+    ):
+        AgentLoop(
+            model=FakeModelClient([]),
+            registry=FakeRegistry([]),
+            session_store=session_store,
+        ).run(
+            current_task="Continue the task.",
+            resume=ResumeRequest.from_question_response(
+                UserQuestionResponse(
+                    request_id="question_missing",
+                    selected_option="readme",
+                )
+            ),
+        )
+
+
+def test_agent_loop_rejects_invalid_question_resume_selection() -> None:
+    session_store = FakeSessionStore(
+        [
+            SessionRecord(
+                record_id="message_1",
+                kind="message",
+                payload=asdict(Message(role="user", content="Pick a file.")),
+            ),
+            SessionRecord(
+                record_id="message_2",
+                kind="message",
+                payload=asdict(
+                    Message(
+                        role="assistant",
+                        content="I need clarification.",
+                        tool_calls=(
+                            ToolCall(
+                                id="call_question",
+                                name="AskUserQuestion",
+                                arguments={"prompt": "Which file should I edit?"},
+                            ),
+                        ),
+                    )
+                ),
+            ),
+            SessionRecord(
+                record_id="message_3",
+                kind="message",
+                payload=asdict(
+                    Message(
+                        role="tool",
+                        name="AskUserQuestion",
+                        content="Need clarification before editing.",
+                        tool_call_id="call_question",
+                        metadata={
+                            "tool_name": "AskUserQuestion",
+                            "is_error": False,
+                            "result": {
+                                "interrupt": {
+                                    "kind": "question",
+                                    "prompt": "Which file should I edit?",
+                                    "request_id": "question_1",
+                                    "options": [
+                                        {"value": "readme", "label": "README.md"},
+                                        {
+                                            "value": "arch",
+                                            "label": "docs/ARCHITECTURE.md",
+                                        },
+                                    ],
+                                }
+                            },
+                        },
+                    )
+                ),
+            ),
+        ]
+    )
+
+    with pytest.raises(ValueError, match="selected_option is not valid"):
+        AgentLoop(
+            model=FakeModelClient([]),
+            registry=FakeRegistry([]),
+            session_store=session_store,
+        ).run(
+            current_task="Continue the task.",
+            resume=ResumeRequest.from_question_response(
+                UserQuestionResponse(
+                    request_id="question_1",
+                    selected_option="missing",
+                )
+            ),
+        )
 
 
 def test_agent_loop_rejects_non_terminal_assistant_response_without_tool_calls() -> None:

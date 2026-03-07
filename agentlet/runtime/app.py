@@ -202,6 +202,7 @@ class RuntimeApp:
                     question_response = self.user_io.resolve_question_interrupt(
                         request
                     )
+                    request.validate_response(question_response)
                     next_resume = ResumeRequest.from_question_response(
                         question_response
                     )

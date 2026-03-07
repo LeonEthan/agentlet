@@ -76,11 +76,17 @@ class AskUserQuestionTool:
             )
 
         try:
+            normalized_prompt = prompt.strip()
+            normalized_request_id = request_id.strip()
             options = tuple(_normalize_option(option) for option in options_payload)
+            _validate_answerability(
+                options,
+                allow_free_text=allow_free_text,
+            )
             interrupt = InterruptMetadata(
                 kind="question",
-                prompt=prompt,
-                request_id=request_id,
+                prompt=normalized_prompt,
+                request_id=normalized_request_id,
                 options=options,
                 allow_free_text=allow_free_text,
                 details={
@@ -114,6 +120,25 @@ def _normalize_option(payload: object) -> InterruptOption:
         label=label,
         description=description,
     )
+
+
+def _validate_answerability(
+    options: tuple[InterruptOption, ...],
+    *,
+    allow_free_text: bool,
+) -> None:
+    if not options and not allow_free_text:
+        raise ValueError(
+            "AskUserQuestion requires options or allow_free_text=True."
+        )
+
+    seen_values: set[str] = set()
+    for option in options:
+        if option.value in seen_values:
+            raise ValueError(
+                "AskUserQuestion option 'value' entries must be unique."
+            )
+        seen_values.add(option.value)
 
 
 __all__ = ["AskUserQuestionTool"]

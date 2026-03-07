@@ -244,7 +244,10 @@ def test_runtime_app_resumes_question_interrupts_through_user_io(tmp_path) -> No
                 kind="question",
                 prompt="Which file should I edit?",
                 request_id="question_1",
-                allow_free_text=True,
+                options=(
+                    InterruptOption(value="readme", label="README.md"),
+                    InterruptOption(value="arch", label="docs/ARCHITECTURE.md"),
+                ),
             ),
         ),
     )
@@ -296,7 +299,10 @@ def test_runtime_app_resumes_question_interrupts_through_user_io(tmp_path) -> No
         UserQuestionRequest(
             request_id="question_1",
             prompt="Which file should I edit?",
-            allow_free_text=True,
+            options=(
+                InterruptOption(value="readme", label="README.md"),
+                InterruptOption(value="arch", label="docs/ARCHITECTURE.md"),
+            ),
         )
     ]
     assert [event.kind for event in user_io.events] == [
@@ -304,6 +310,80 @@ def test_runtime_app_resumes_question_interrupts_through_user_io(tmp_path) -> No
         "resumed",
     ]
     assert outcome.message.content == "Use README.md."
+
+
+def test_runtime_app_resumes_question_interrupts_with_free_text(tmp_path) -> None:
+    ask_tool = FakeTool(
+        ToolDefinition(
+            name="AskUserQuestion",
+            description="Ask the user a clarifying question.",
+            input_schema={
+                "type": "object",
+                "properties": {"prompt": {"type": "string"}},
+                "required": ["prompt"],
+                "additionalProperties": False,
+            },
+            approval_category="external_or_interrupt",
+        ),
+        ToolResult.interrupt_result(
+            output="Need clarification.",
+            interrupt=InterruptMetadata(
+                kind="question",
+                prompt="Which file should I edit?",
+                request_id="question_1",
+                allow_free_text=True,
+            ),
+        ),
+    )
+    model = FakeModelClient(
+        [
+            ModelResponse(
+                message=Message(
+                    role="assistant",
+                    content="I need clarification.",
+                    tool_calls=(
+                        ToolCall(
+                            id="call_question",
+                            name="AskUserQuestion",
+                            arguments={"prompt": "Which file should I edit?"},
+                        ),
+                    ),
+                ),
+                finish_reason="tool_calls",
+            ),
+            ModelResponse(
+                message=Message(role="assistant", content="Use notes.md."),
+                finish_reason="stop",
+            ),
+        ]
+    )
+    user_io = FakeUserIO(
+        question_responses=[
+            UserQuestionResponse(
+                request_id="question_1",
+                free_text="notes.md",
+            )
+        ]
+    )
+
+    app = build_runtime_app(
+        model=model,
+        user_io=user_io,
+        workspace_root=tmp_path,
+        registry=FakeRegistry([ask_tool]),
+        approval_policy=ApprovalPolicy(
+            {"external_or_interrupt": "allow"}
+        ),
+    )
+
+    outcome = app.run_turn(current_task="Continue.")
+
+    assert isinstance(outcome, CompletedTurn)
+    assert [event.kind for event in user_io.events] == [
+        "question_interrupted",
+        "resumed",
+    ]
+    assert outcome.message.content == "Use notes.md."
 
 
 def test_default_runtime_registry_supports_question_interrupt_flow(tmp_path) -> None:
@@ -331,34 +411,12 @@ def test_default_runtime_registry_supports_question_interrupt_flow(tmp_path) -> 
                 finish_reason="tool_calls",
             ),
             ModelResponse(
-                message=Message(
-                    role="assistant",
-                    content="Proceeding with the question.",
-                    tool_calls=(
-                        ToolCall(
-                            id="call_question",
-                            name="AskUserQuestion",
-                            arguments={
-                                "prompt": "Which file should I edit?",
-                                "request_id": "question_1",
-                                "options": [
-                                    {"value": "readme", "label": "README.md"},
-                                    {"value": "arch", "label": "docs/ARCHITECTURE.md"},
-                                ],
-                            },
-                        ),
-                    ),
-                ),
-                finish_reason="tool_calls",
-            ),
-            ModelResponse(
                 message=Message(role="assistant", content="Use README.md."),
                 finish_reason="stop",
             ),
         ]
     )
     user_io = FakeUserIO(
-        approval_decisions=["approved"],
         question_responses=[
             UserQuestionResponse(
                 request_id="question_1",
@@ -388,8 +446,6 @@ def test_default_runtime_registry_supports_question_interrupt_flow(tmp_path) -> 
         )
     ]
     assert [event.kind for event in user_io.events] == [
-        "approval_requested",
-        "resumed",
         "question_interrupted",
         "resumed",
     ]

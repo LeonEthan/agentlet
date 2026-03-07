@@ -242,6 +242,10 @@ Later runtimes, such as HTTP or chat integrations, should be added here or as si
 - Asks a structured clarifying question.
 - Supports multiple choice options and optional free text.
 - Returns an interrupt result that pauses the agent loop until the user responds.
+- Does not require a separate approval prompt before asking; the question itself is
+  the human-in-the-loop boundary.
+- The interrupted question payload must be persisted in session history so a later
+  resume can be validated against the original request id and option set.
 
 ## Tool Execution Model
 

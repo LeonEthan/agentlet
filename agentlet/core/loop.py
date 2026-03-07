@@ -14,7 +14,13 @@ from agentlet.core.types import InterruptMetadata, JSONObject, TokenUsage, deep_
 from agentlet.llm.base import ModelClient
 from agentlet.llm.schemas import ModelRequest, ModelToolDefinition, ToolChoice
 from agentlet.memory.session_store import SessionRecord
-from agentlet.runtime.events import ApprovalRequest, ApprovalResponse, ResumeRequest
+from agentlet.runtime.events import (
+    ApprovalRequest,
+    ApprovalResponse,
+    ResumeRequest,
+    UserQuestionRequest,
+    UserQuestionResponse,
+)
 from agentlet.tools.base import Tool, ToolDefinition, ToolResult
 
 
@@ -131,6 +137,18 @@ class AgentLoop:
             record for record in existing_records if record.kind == "message"
         ]
         durable_memory = self.memory_store.read() if self.memory_store is not None else ""
+        pending_question = _question_response_from_resume(resume)
+        if pending_question is not None:
+            request = _question_request_for_response(
+                pending_question,
+                session_history,
+            )
+            if request is None:
+                raise ValueError(
+                    "question resume request_id does not match a persisted "
+                    "AskUserQuestion interrupt"
+                )
+            request.validate_response(pending_question)
         pending_interrupt = _pending_interrupt_from_resume(resume)
         pending_approval = _approval_response_from_resume(resume)
 
@@ -461,6 +479,14 @@ def _approval_response_from_resume(
     return resume.payload
 
 
+def _question_response_from_resume(
+    resume: ResumeRequest | None,
+) -> UserQuestionResponse | None:
+    if resume is None or resume.kind != "question":
+        return None
+    return resume.payload
+
+
 def _new_input_messages(
     *,
     pending_interrupt: PendingInterruptContext | None,
@@ -514,6 +540,32 @@ def _approval_request_matches_tool_call(
         request.tool_name == tool_call.name
         and request.arguments == tool_call.arguments
     )
+
+
+def _question_request_for_response(
+    response: UserQuestionResponse,
+    session_history: list[SessionRecord],
+) -> UserQuestionRequest | None:
+    for record in reversed(session_history):
+        try:
+            message = Message.from_dict(record.payload)
+        except (TypeError, ValueError):
+            continue
+        if message.role != "tool":
+            continue
+        result_metadata = message.metadata.get("result")
+        if not isinstance(result_metadata, dict):
+            continue
+        interrupt_payload = result_metadata.get("interrupt")
+        if not isinstance(interrupt_payload, dict):
+            continue
+        if interrupt_payload.get("kind") != "question":
+            continue
+        if interrupt_payload.get("request_id") != response.request_id:
+            continue
+        interrupt = InterruptMetadata.from_dict(interrupt_payload)
+        return UserQuestionRequest.from_interrupt(interrupt)
+    return None
 
 
 def _validate_arguments_against_schema(

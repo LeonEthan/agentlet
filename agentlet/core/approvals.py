@@ -74,7 +74,7 @@ class ApprovalPolicy:
         """Return the approval decision for one tool definition."""
 
         _validate_approval_category(definition.approval_category)
-        mode = self.mode_for_category(definition.approval_category)
+        mode = _mode_for_definition(definition, self._category_modes)
         return ApprovalDecision(
             tool_name=definition.name,
             approval_category=definition.approval_category,
@@ -110,3 +110,14 @@ def _build_reason(category: ApprovalCategory, mode: ApprovalMode) -> str:
     if mode == "allow":
         return f"{category} tools may run without runtime approval."
     return f"{category} tools require runtime approval before execution."
+
+
+def _mode_for_definition(
+    definition: ToolDefinition,
+    category_modes: Mapping[ApprovalCategory, ApprovalMode],
+) -> ApprovalMode:
+    if definition.name == "AskUserQuestion":
+        return "allow"
+    mode = category_modes[definition.approval_category]
+    _validate_approval_mode(mode)
+    return mode

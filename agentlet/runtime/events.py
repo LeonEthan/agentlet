@@ -182,6 +182,16 @@ class UserQuestionRequest:
             details=interrupt.details,
         )
 
+    def validate_response(self, response: "UserQuestionResponse") -> None:
+        if response.request_id != self.request_id:
+            raise ValueError("question response request_id does not match request")
+        if response.selected_option is not None:
+            allowed_values = {option.value for option in self.options}
+            if response.selected_option not in allowed_values:
+                raise ValueError("question response selected_option is not valid")
+        if response.free_text is not None and not self.allow_free_text:
+            raise ValueError("question response free_text is not allowed")
+
 
 @dataclass(frozen=True, slots=True)
 class UserQuestionResponse:
@@ -199,6 +209,14 @@ class UserQuestionResponse:
             raise ValueError(
                 "question responses must include selected_option or free_text"
             )
+        if self.selected_option is not None and self.free_text is not None:
+            raise ValueError(
+                "question responses must include selected_option or free_text, not both"
+            )
+        if self.selected_option is not None and not self.selected_option.strip():
+            raise ValueError("selected_option must not be empty")
+        if self.free_text is not None and not self.free_text.strip():
+            raise ValueError("free_text must not be empty")
         object.__setattr__(self, "details", deep_copy_json_object(self.details))
 
     def as_dict(self) -> JSONObject:

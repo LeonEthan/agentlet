@@ -128,6 +128,69 @@ def test_resume_request_schema_is_stable_and_validates_payload_kind() -> None:
         )
 
 
+def test_question_request_validates_structured_responses() -> None:
+    request = UserQuestionRequest(
+        request_id="question_1",
+        prompt="Which file should I inspect?",
+        options=(
+            InterruptOption(value="readme", label="README.md"),
+            InterruptOption(value="arch", label="docs/ARCHITECTURE.md"),
+        ),
+    )
+
+    request.validate_response(
+        UserQuestionResponse(
+            request_id="question_1",
+            selected_option="readme",
+        )
+    )
+
+    with pytest.raises(ValueError, match="selected_option is not valid"):
+        request.validate_response(
+            UserQuestionResponse(
+                request_id="question_1",
+                selected_option="missing",
+            )
+        )
+
+    with pytest.raises(ValueError, match="request_id does not match"):
+        request.validate_response(
+            UserQuestionResponse(
+                request_id="question_2",
+                selected_option="readme",
+            )
+        )
+
+    with pytest.raises(ValueError, match="free_text is not allowed"):
+        request.validate_response(
+            UserQuestionResponse(
+                request_id="question_1",
+                free_text="Use README.md",
+            )
+        )
+
+
+def test_question_response_rejects_ambiguous_or_empty_answers() -> None:
+    with pytest.raises(ValueError, match="not both"):
+        UserQuestionResponse(
+            request_id="question_1",
+            selected_option="readme",
+            free_text="Use README.md",
+        )
+
+    with pytest.raises(ValueError, match="selected_option must not be empty"):
+        UserQuestionResponse(
+            request_id="question_1",
+            selected_option="   ",
+        )
+
+    with pytest.raises(ValueError, match="free_text must not be empty"):
+        UserQuestionResponse(
+            request_id="question_1",
+            free_text="   ",
+        )
+
+
 def test_approval_resume_event_round_trips() -> None:
     response = ApprovalResponse(
         request_id="approval_1",

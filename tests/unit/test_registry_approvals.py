@@ -88,6 +88,7 @@ def test_builtin_tool_names_and_categories_match_architecture() -> None:
         ("Write", "mutating", "require_approval"),
         ("Bash", "exec", "require_approval"),
         ("WebFetch", "external_or_interrupt", "require_approval"),
+        ("AskUserQuestion", "external_or_interrupt", "allow"),
     ],
 )
 def test_approval_policy_decision_matrix(
@@ -118,6 +119,17 @@ def test_approval_policy_can_resolve_decision_from_registry() -> None:
 
 def test_approval_policy_accepts_category_overrides() -> None:
     policy = ApprovalPolicy({"external_or_interrupt": "allow"})
+
+    decision = policy.decision_for_definition(
+        _definition("AskUserQuestion", "external_or_interrupt")
+    )
+
+    assert decision.mode == "allow"
+    assert decision.requires_approval is False
+
+
+def test_approval_policy_always_allows_ask_user_question() -> None:
+    policy = ApprovalPolicy({"external_or_interrupt": "require_approval"})
 
     decision = policy.decision_for_definition(
         _definition("AskUserQuestion", "external_or_interrupt")
