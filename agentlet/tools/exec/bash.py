@@ -95,6 +95,9 @@ class BashTool:
     workspace_root: Path
     default_timeout_seconds: float | None = None
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "workspace_root", self.workspace_root.resolve())
+
     @property
     def definition(self) -> ToolDefinition:
         return ToolDefinition(
@@ -136,6 +139,11 @@ class BashTool:
         cwd = self._resolve_cwd(arguments.get("cwd"))
         if cwd is None:
             return ToolResult.error("Bash cwd must be a string when provided.")
+        if cwd is _INVALID_CWD:
+            return ToolResult.error(
+                "Bash cwd must stay inside the workspace root.",
+                metadata={"command": command, "cwd": str(arguments.get("cwd", ""))},
+            )
         if not cwd.exists():
             return ToolResult.error(
                 f"Bash cwd does not exist: {cwd}",
@@ -173,16 +181,22 @@ class BashTool:
             metadata=metadata,
         )
 
-    def _resolve_cwd(self, raw_cwd: object) -> Path | None:
+    def _resolve_cwd(self, raw_cwd: object) -> Path | None | object:
         if raw_cwd is None:
-            return self.workspace_root
-        if not isinstance(raw_cwd, str):
+            candidate = self.workspace_root
+        elif not isinstance(raw_cwd, str):
             return None
+        else:
+            candidate = Path(raw_cwd)
+            if not candidate.is_absolute():
+                candidate = self.workspace_root / candidate
 
-        candidate = Path(raw_cwd)
-        if candidate.is_absolute():
-            return candidate
-        return self.workspace_root / candidate
+        resolved = candidate.resolve(strict=False)
+        try:
+            resolved.relative_to(self.workspace_root)
+        except ValueError:
+            return _INVALID_CWD
+        return resolved
 
     def _resolve_timeout(self, raw_timeout: object) -> float | None | object:
         if raw_timeout is None:
@@ -203,3 +217,4 @@ def _coerce_process_output(value: bytes | str | None) -> str:
 
 
 _INVALID_TIMEOUT = object()
+_INVALID_CWD = object()

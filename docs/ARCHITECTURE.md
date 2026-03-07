@@ -67,6 +67,7 @@ agentlet/
 │   ├── core/
 │   │   ├── approvals.py
 │   │   ├── context.py
+│   │   ├── interrupts.py
 │   │   ├── loop.py
 │   │   ├── messages.py
 │   │   └── types.py
@@ -114,6 +115,11 @@ Owns the core execution model.
 - `context.py`
   - Defines `ContextBuilder`.
   - Builds the effective model input from system instructions, history, memory, and current task state.
+- `interrupts.py`
+  - Defines structured approval, question, and resume payloads used by both the
+    loop and the runtime.
+  - Keeps pause/resume contracts in a core-owned module instead of coupling
+    `core` back to `runtime`.
 - `messages.py`
   - Defines normalized message structures used across the framework.
 - `types.py`
@@ -175,7 +181,7 @@ Owns app wiring and interactive flow.
 - `app.py`
   - Assembles the configured loop, registry, model client, and stores.
 - `events.py`
-  - Defines runtime-level events.
+  - Defines runtime-level event envelopes used for observation and rendering.
 - `user_io.py`
   - Defines the interaction boundary for user prompts, approval requests, and question interrupts.
 
@@ -213,7 +219,11 @@ Later runtimes, such as HTTP or chat integrations, should be added here or as si
 
 ### Bash
 
-- Runs terminal commands inside the selected working directory.
+- Runs terminal commands from a selected working directory.
+- Relative `cwd` values resolve from the runtime workspace root, and explicit
+  `cwd` values must stay under that root.
+- The tool does not provide shell-level filesystem sandboxing; command contents
+  still need runtime approval.
 - Supports timeout and approval policy.
 - Must return stdout, stderr, exit code, and execution metadata.
 
@@ -379,6 +389,25 @@ Pause and resume state is intentionally inspectable:
   the prefix `Interrupt resume context:`
 
 History truncation, if needed later, should be logical rather than destructive.
+
+## Runtime Configuration
+
+The default CLI runtime is assembled from:
+
+- environment variables
+  - `AGENTLET_MODEL`
+  - `AGENTLET_API_KEY`
+  - optional `AGENTLET_BASE_URL`
+- CLI arguments
+  - `--workspace-root`
+  - `--state-dir`
+  - `--session-path`
+  - `--memory-path`
+  - `--instructions-path`
+
+`workspace-root` is the boundary exposed to file-system tools and to relative
+`Bash` working-directory resolution. It is not a shell sandbox for arbitrary
+command contents.
 
 ### Durable Memory
 

@@ -3,17 +3,17 @@ from __future__ import annotations
 from io import StringIO
 
 from agentlet.core.approvals import ApprovalPolicy
+from agentlet.core.interrupts import (
+    ApprovalRequest,
+    UserQuestionRequest,
+    UserQuestionResponse,
+)
 from apps.cli import TerminalUserIO, main
 from agentlet.core.loop import CompletedTurn, InterruptedTurn
 from agentlet.core.messages import Message, ToolCall
 from agentlet.core.types import InterruptMetadata, InterruptOption, TokenUsage
 from agentlet.llm.schemas import ModelRequest, ModelResponse
 from agentlet.runtime.app import build_runtime_app
-from agentlet.runtime.events import (
-    ApprovalRequest,
-    UserQuestionRequest,
-    UserQuestionResponse,
-)
 from agentlet.tools.interaction.ask_user_question import AskUserQuestionTool
 from agentlet.tools.base import ToolDefinition, ToolResult
 

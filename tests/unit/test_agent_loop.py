@@ -6,6 +6,12 @@ import pytest
 
 from agentlet.core.approvals import ApprovalPolicy
 from agentlet.core.context import CurrentTaskState
+from agentlet.core.interrupts import (
+    ApprovalRequest,
+    ApprovalResponse,
+    ResumeRequest,
+    UserQuestionResponse,
+)
 from agentlet.core.loop import (
     AgentLoop,
     ApprovalRequiredTurn,
@@ -16,12 +22,6 @@ from agentlet.core.messages import Message, ToolCall
 from agentlet.core.types import InterruptMetadata, InterruptOption
 from agentlet.llm.schemas import ModelRequest, ModelResponse
 from agentlet.memory import SessionRecord
-from agentlet.runtime.events import (
-    ApprovalRequest,
-    ApprovalResponse,
-    ResumeRequest,
-    UserQuestionResponse,
-)
 from agentlet.tools.base import ToolDefinition, ToolResult
 
 
