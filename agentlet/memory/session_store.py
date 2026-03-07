@@ -80,6 +80,12 @@ class SessionStore:
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
 
+    def ensure_exists(self) -> None:
+        """Materialize the JSONL file so the runtime layout exists on disk."""
+
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.touch(exist_ok=True)
+
     def append(self, record: SessionRecord | JSONObject) -> SessionRecord:
         """Append one normalized record to the session history file.
 

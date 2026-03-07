@@ -116,6 +116,10 @@ def test_build_runtime_app_assembles_default_components_and_runs_minimal_session
     assert app.loop.session_store.path == (tmp_path / ".agentlet" / "session.jsonl")
     assert app.loop.memory_store is not None
     assert app.loop.memory_store.path == (tmp_path / ".agentlet" / "memory.md")
+    assert app.loop.session_store.path.exists()
+    assert app.loop.session_store.path.read_text(encoding="utf-8") == ""
+    assert app.loop.memory_store.path.exists()
+    assert app.loop.memory_store.path.read_text(encoding="utf-8") == ""
     assert tuple(
         definition.name for definition in app.loop.registry.definitions()
     ) == (

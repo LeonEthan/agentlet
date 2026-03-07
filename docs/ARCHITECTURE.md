@@ -284,7 +284,19 @@ Tools are grouped by risk so the runtime can apply consistent approval behavior.
 - `external_or_interrupt`
   - `WebSearch`, `WebFetch`, `AskUserQuestion`
 
-Approval policy should be centralized in `core.approvals`, not spread across tool implementations.
+Approval policy is centralized in `core.approvals`, not spread across tool implementations.
+
+The default policy is:
+
+- `read_only`
+  - allowed without runtime approval
+- `mutating`
+  - require runtime approval
+- `exec`
+  - require runtime approval
+- `external_or_interrupt`
+  - require runtime approval, except `AskUserQuestion`, which is always allowed
+    because the question itself is the pause boundary
 
 ## Runtime Flow
 
@@ -298,11 +310,21 @@ The standard turn flow is:
 6. If the model emits tool calls:
    1. Validate the tool request.
    2. Apply approval policy.
-   3. Execute the tool.
-   4. Append the tool result to the working message list.
-   5. If the tool result is an interrupt, pause and wait for user input.
+   3. If approval is required, persist the partial turn plus an `approval_request`
+      record and return control to the runtime.
+   4. If a matching approval resume arrives later, inject its structured resume
+      context into the next model turn. Replayed approval resumes are rejected.
+   5. Execute the tool.
+   6. Append the tool result to the working message list.
+   7. If the tool result is an interrupt, persist the partial turn and return
+      control to the runtime.
 7. When the model emits a final assistant response, persist the turn.
 8. Return the response to the runtime.
+
+`AskUserQuestion` follows the same interrupt path, but the persisted tool message
+contains the structured question payload. On resume, the runtime must supply a
+`UserQuestionResponse`, which is validated against the persisted interrupt before
+the loop continues. Replayed question resumes are rejected.
 
 ## Recommended Agent Behavior
 
@@ -315,26 +337,52 @@ The default system instructions should bias the agent toward this workflow:
 5. Use `Bash` for verification and repository inspection.
 6. Use `WebSearch` and `WebFetch` only when current external information is required.
 
-## Session and Memory Strategy
+## Persistence Layout
+
+The default runtime file layout under a workspace is:
+
+```text
+<workspace>/
+├── AGENTS.md
+└── .agentlet/
+    ├── memory.md
+    └── session.jsonl
+```
+
+- `AGENTS.md`
+  - workspace-local system instructions loaded by the runtime when present
+- `.agentlet/memory.md`
+  - durable markdown memory included as a system message
+- `.agentlet/session.jsonl`
+  - append-only session history plus pause/resume metadata
+
+When the runtime app is assembled, it materializes `.agentlet/session.jsonl` and
+`.agentlet/memory.md` if they do not already exist. `AGENTS.md` is optional and
+is only read when present in the workspace.
 
 ### Session History
 
-Session history should be append-only and local.
+Session history is append-only and local.
 
-Initial recommendation:
+`session.jsonl` currently persists:
 
-- One JSONL file per session.
-- Each line stores a normalized message or metadata record.
-- History truncation, if needed, should be logical rather than destructive.
+- `message`
+  - normalized user, assistant, and tool messages in append order
+- `approval_request`
+  - approval prompts persisted before the runtime pauses execution
+
+Pause and resume state is intentionally inspectable:
+
+- question interrupts are stored in the tool message metadata under
+  `result.interrupt`
+- approval resumes and question resumes are stored as explicit user messages with
+  the prefix `Interrupt resume context:`
+
+History truncation, if needed later, should be logical rather than destructive.
 
 ### Durable Memory
 
-Durable memory starts simple.
-
-Initial recommendation:
-
-- `MEMORY.md` for facts worth carrying across turns.
-- Optional `HISTORY.md` for searchable summaries or archived context.
+Durable memory is a single markdown file at `.agentlet/memory.md`.
 
 This keeps the system inspectable and avoids premature vector-store complexity.
 
