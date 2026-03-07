@@ -34,6 +34,8 @@ from agentlet.tools.fs.read import ReadTool
 from agentlet.tools.fs.write import WriteTool
 from agentlet.tools.interaction.ask_user_question import AskUserQuestionTool
 from agentlet.tools.registry import ToolRegistry
+from agentlet.tools.web.fetch import WebFetchTool
+from agentlet.tools.web.search import WebSearchTool
 
 
 RuntimeRunOutcome = CompletedTurn | InterruptedTurn
@@ -350,6 +352,8 @@ def build_default_registry(
             BashTool(workspace, default_timeout_seconds=bash_timeout_seconds),
             GlobTool(workspace),
             GrepTool(workspace),
+            WebSearchTool(),
+            WebFetchTool(),
             AskUserQuestionTool(),
         ]
     )

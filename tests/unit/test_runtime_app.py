@@ -118,7 +118,17 @@ def test_build_runtime_app_assembles_default_components_and_runs_minimal_session
     assert app.loop.memory_store.path == (tmp_path / ".agentlet" / "memory.md")
     assert tuple(
         definition.name for definition in app.loop.registry.definitions()
-    ) == ("Read", "Write", "Edit", "Bash", "Glob", "Grep", "AskUserQuestion")
+    ) == (
+        "Read",
+        "Write",
+        "Edit",
+        "Bash",
+        "Glob",
+        "Grep",
+        "WebSearch",
+        "WebFetch",
+        "AskUserQuestion",
+    )
     outcome = app.run_turn(current_task="Say ready.")
     assert isinstance(outcome, CompletedTurn)
     assert outcome.message.content == "Ready."
