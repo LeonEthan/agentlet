@@ -324,8 +324,50 @@ def test_protocols_are_runtime_checkable() -> None:
                 finish_reason="stop",
             )
 
+        def complete_stream(self, request, handler):
+            response = self.complete(request)
+            if response.message.content:
+                handler(response.message.content)
+            return response
+
     tool = FakeTool()
     client = FakeModelClient()
 
     assert isinstance(tool, Tool)
     assert isinstance(client, ModelClient)
+
+
+def test_request_context_generate_id():
+    """Test request ID generation."""
+    from agentlet.core.types import RequestContext
+
+    request_id = RequestContext.generate_id()
+
+    assert request_id.startswith("req_")
+    assert len(request_id) == 20  # "req_" + 16 hex chars
+
+
+def test_request_context_set_and_get():
+    """Test setting and getting request context."""
+    from agentlet.core.types import RequestContext
+
+    with RequestContext.set_current("test-123") as ctx:
+        assert RequestContext.get_request_id() == "test-123"
+        assert RequestContext.get_current() == ctx
+
+
+def test_request_context_outside_context():
+    """Test getting request ID outside context returns None."""
+    from agentlet.core.types import RequestContext
+
+    assert RequestContext.get_request_id() is None
+    assert RequestContext.get_current() is None
+
+
+def test_request_context_unique_ids():
+    """Test that generated IDs are unique."""
+    from agentlet.core.types import RequestContext
+
+    ids = [RequestContext.generate_id() for _ in range(100)]
+
+    assert len(set(ids)) == 100  # All unique

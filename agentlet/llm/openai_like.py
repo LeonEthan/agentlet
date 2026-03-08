@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from socket import timeout as SocketTimeout
 from typing import Protocol, runtime_checkable
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from agentlet.core.messages import Message, ToolCall
-from agentlet.core.types import JSONObject, TokenUsage, deep_copy_json_object
+from agentlet.core.types import JSONObject, TokenUsage, deep_copy_json_object, retry_with_backoff
 from agentlet.llm.base import ModelClient
 from agentlet.llm.schemas import ModelRequest, ModelResponse, ModelToolDefinition, ToolChoice
 
@@ -70,7 +71,13 @@ def build_openai_like_transport(
         "Content-Type": "application/json",
     }
 
-    def transport(payload: JSONObject) -> JSONObject:
+    @retry_with_backoff(
+        max_retries=3,
+        base_delay=1.0,
+        max_delay=30.0,
+        retryable_exceptions=(URLError, SocketTimeout, TimeoutError),
+    )
+    def _do_request(payload: JSONObject) -> JSONObject:
         request_body = json.dumps(payload).encode("utf-8")
         request = Request(
             endpoint,
@@ -83,13 +90,16 @@ def build_openai_like_transport(
                 response_body = response.read().decode("utf-8")
         except HTTPError as exc:
             body = exc.read().decode("utf-8", errors="replace")
+            # Retry on rate limit (429) and server errors (5xx)
+            if exc.code == 429 or (exc.code >= 500 and exc.code < 600):
+                raise URLError(f"HTTP {exc.code}: {body}") from exc
             raise RuntimeError(
                 f"openai-like request failed with HTTP {exc.code}: {body}"
             ) from exc
-        except URLError as exc:
-            raise RuntimeError(
-                f"openai-like request failed: {exc.reason}"
-            ) from exc
+        except URLError:
+            raise
+        except SocketTimeout:
+            raise
 
         try:
             response_payload = json.loads(response_body)
@@ -101,7 +111,7 @@ def build_openai_like_transport(
             raise RuntimeError("openai-like response payload must be a JSON object")
         return response_payload
 
-    return transport
+    return _do_request
 
 
 def build_openai_like_request(

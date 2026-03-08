@@ -234,3 +234,71 @@ def test_context_builder_includes_approval_resume_context() -> None:
             ),
         ),
     )
+
+
+def test_context_builder_with_max_history_limits_messages() -> None:
+    """Test that max_history_messages limits the number of history messages."""
+    builder = ContextBuilder(max_history_messages=3)
+
+    messages = builder.build(
+        system_instructions="You are helpful.",
+        session_history=[
+            Message(role="user", content="Message 1"),
+            Message(role="assistant", content="Response 1"),
+            Message(role="user", content="Message 2"),
+            Message(role="assistant", content="Response 2"),
+            Message(role="user", content="Message 3"),
+            Message(role="assistant", content="Response 3"),
+        ],
+    )
+
+    # System + 3 history messages
+    assert len(messages) == 4
+    assert messages[0].role == "system"
+    # Should keep most recent messages
+    assert messages[1].content == "Response 2"
+    assert messages[2].content == "Message 3"
+    assert messages[3].content == "Response 3"
+
+
+def test_context_builder_no_limit_includes_all_history() -> None:
+    """Test that None max_history_messages includes all history."""
+    builder = ContextBuilder(max_history_messages=None)
+
+    messages = builder.build(
+        session_history=[
+            Message(role="user", content=f"Message {i}")
+            for i in range(100)
+        ],
+    )
+
+    # All 100 history messages
+    assert len(messages) == 100
+
+
+def test_context_builder_respects_limit_with_system_and_task() -> None:
+    """Test that context window works with system instructions and task."""
+    builder = ContextBuilder(max_history_messages=2)
+
+    messages = builder.build(
+        system_instructions="You are helpful.",
+        session_history=[
+            Message(role="user", content="Old message 1"),
+            Message(role="assistant", content="Old response 1"),
+            Message(role="user", content="Old message 2"),
+            Message(role="assistant", content="Old response 2"),
+            Message(role="user", content="Recent message 1"),
+            Message(role="assistant", content="Recent response 1"),
+        ],
+        current_task="Current task",
+    )
+
+    # System + 2 history + task
+    assert len(messages) == 4
+    assert messages[0].role == "system"
+    # Most recent 2 history messages
+    assert messages[1].content == "Recent message 1"
+    assert messages[2].content == "Recent response 1"
+    # Current task
+    assert messages[3].role == "user"
+    assert "Current task" in messages[3].content

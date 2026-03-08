@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from agentlet.memory import (
@@ -229,3 +231,90 @@ def test_memory_store_rejects_non_string_content(tmp_path) -> None:
 
     with pytest.raises(TypeError, match="must be a string"):
         store.write(123)  # type: ignore[arg-type]
+
+
+def test_session_store_get_by_id(tmp_path) -> None:
+    store = SessionStore(tmp_path / "session.jsonl")
+    record1 = SessionRecord(record_id="msg_1", kind="message", payload={"role": "user"})
+    record2 = SessionRecord(record_id="msg_2", kind="message", payload={"role": "assistant"})
+
+    store.append(record1)
+    store.append(record2)
+
+    assert store.get("msg_1") == record1
+    assert store.get("msg_2") == record2
+    assert store.get("nonexistent") is None
+
+
+def test_session_store_has_record_id(tmp_path) -> None:
+    store = SessionStore(tmp_path / "session.jsonl")
+    record = SessionRecord(record_id="msg_1", kind="message", payload={"role": "user"})
+
+    store.append(record)
+
+    assert store.has("msg_1") is True
+    assert store.has("nonexistent") is False
+
+
+def test_session_store_caching_avoids_reloads(tmp_path) -> None:
+    store = SessionStore(tmp_path / "session.jsonl")
+    record = SessionRecord(record_id="msg_1", kind="message", payload={"role": "user"})
+
+    store.append(record)
+
+    # First load populates cache
+    records1 = store.load()
+    # Second load should use cache
+    records2 = store.load()
+
+    assert records1 == records2
+    # Records should be copies, not same objects
+    assert records1 is not records2
+
+
+def test_session_store_detects_external_modification(tmp_path) -> None:
+    store = SessionStore(tmp_path / "session.jsonl")
+    record1 = SessionRecord(record_id="msg_1", kind="message", payload={"role": "user"})
+
+    store.append(record1)
+    store.load()  # Populate cache
+
+    # Simulate external modification
+    record2 = SessionRecord(record_id="msg_2", kind="message", payload={"role": "assistant"})
+    store.path.write_text(
+        json.dumps(record2.as_dict(), ensure_ascii=False, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    # Should detect modification and reload
+    records = store.load()
+    assert len(records) == 1
+    assert records[0].record_id == "msg_2"
+
+
+def test_session_store_atomic_append_preserves_existing_data(tmp_path) -> None:
+    store = SessionStore(tmp_path / "session.jsonl")
+    record1 = SessionRecord(record_id="msg_1", kind="message", payload={"role": "user"})
+    record2 = SessionRecord(record_id="msg_2", kind="message", payload={"role": "assistant"})
+
+    store.append(record1)
+    store.append(record2)
+
+    records = store.load()
+    assert len(records) == 2
+    assert records[0].record_id == "msg_1"
+    assert records[1].record_id == "msg_2"
+
+
+def test_session_store_index_preserved_across_multiple_appends(tmp_path) -> None:
+    store = SessionStore(tmp_path / "session.jsonl")
+
+    for i in range(100):
+        store.append(SessionRecord(record_id=f"msg_{i}", kind="message", payload={"index": i}))
+
+    # All records should be indexed
+    for i in range(100):
+        assert store.has(f"msg_{i}") is True
+        record = store.get(f"msg_{i}")
+        assert record is not None
+        assert record.payload["index"] == i

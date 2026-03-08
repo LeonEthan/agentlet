@@ -184,9 +184,103 @@ def apply_env_from_settings(settings: UserSettings) -> None:
     SettingsLoader.apply_env(settings)
 
 
+def _get_help_message(error_key: str) -> str:
+    """Get helpful guidance for configuration errors."""
+    help_messages = {
+        "AGENTLET_MODEL": "Set AGENTLET_MODEL to a valid model name (e.g., 'gpt-4o', 'claude-3-opus-20240229')",
+        "AGENTLET_API_KEY": "Set AGENTLET_API_KEY with your API key from the provider dashboard",
+        "provider": "Valid providers: anthropic, openai, openai-like, openai_like",
+        "max_iterations": "max_iterations must be a positive integer (default: 8)",
+        "bash_timeout_seconds": "bash_timeout_seconds must be a positive number (default: 120)",
+    }
+    return help_messages.get(error_key, "Check documentation for valid configuration")
+
+
+class ConfigurationError(ValueError):
+    """Raised when configuration is invalid with helpful suggestions."""
+
+    def __init__(self, message: str, suggestion: str | None = None) -> None:
+        self.suggestion = suggestion
+        full_message = message
+        if suggestion:
+            full_message = f"{message}\n\nSuggestion: {suggestion}"
+        super().__init__(full_message)
+
+
+def validate_required_env() -> dict[str, str]:
+    """Validate that required environment variables are set.
+
+    Returns:
+        Dictionary of found environment variables.
+
+    Raises:
+        ConfigurationError: If required variables are missing.
+    """
+    required = ["AGENTLET_MODEL", "AGENTLET_API_KEY"]
+    missing = []
+    found = {}
+
+    for key in required:
+        value = os.environ.get(key, "").strip()
+        if not value:
+            missing.append(key)
+        else:
+            found[key] = value
+
+    if missing:
+        suggestions = []
+        for key in missing:
+            suggestions.append(f"  - {key}: {_get_help_message(key)}")
+
+        raise ConfigurationError(
+            f"Missing required environment variables: {', '.join(missing)}",
+            suggestion="\n".join(suggestions),
+        )
+
+    return found
+
+
+def detect_common_issues() -> list[str]:
+    """Detect common configuration issues and return warnings.
+
+    Returns:
+        List of warning messages about detected issues.
+    """
+    warnings = []
+
+    # Check for mismatched provider and model
+    provider = os.environ.get("AGENTLET_PROVIDER", "").lower()
+    model = os.environ.get("AGENTLET_MODEL", "").lower()
+
+    if provider == "anthropic" and not any(x in model for x in ["claude"]):
+        warnings.append(
+            "Provider is 'anthropic' but model name doesn't contain 'claude'. "
+            "Did you mean to use a Claude model?"
+        )
+
+    if provider == "openai" and any(x in model for x in ["claude"]):
+        warnings.append(
+            "Provider is 'openai' but model name contains 'claude'. "
+            "Did you mean to set AGENTLET_PROVIDER=anthropic?"
+        )
+
+    # Check for localhost/development URLs in production
+    base_url = os.environ.get("AGENTLET_BASE_URL", "")
+    if "localhost" in base_url or "127.0.0.1" in base_url:
+        warnings.append(
+            f"Using local endpoint: {base_url}. "
+            "Ensure this is intentional."
+        )
+
+    return warnings
+
+
 __all__ = [
-    "UserSettings",
+    "ConfigurationError",
     "SettingsLoader",
-    "load_settings",
+    "UserSettings",
     "apply_env_from_settings",
+    "detect_common_issues",
+    "load_settings",
+    "validate_required_env",
 ]

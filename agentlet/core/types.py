@@ -2,11 +2,83 @@
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass, field
+from functools import wraps
+from time import sleep
+from typing import Callable, TypeVar
+from uuid import uuid4
 
 JSONScalar = str | int | float | bool | None
 JSONValue = JSONScalar | list["JSONValue"] | dict[str, "JSONValue"]
 JSONObject = dict[str, JSONValue]
+
+
+class LogLevel:
+    """Log level constants matching Python's logging module."""
+
+    DEBUG = 10
+    INFO = 20
+    WARNING = 30
+    ERROR = 40
+    CRITICAL = 50
+
+
+class StructuredLogger:
+    """Minimal structured logger for production observability.
+
+    Outputs JSON lines to stderr for machine parsing while keeping
+    human-readable messages for development.
+    """
+
+    def __init__(self, name: str, level: int = LogLevel.INFO) -> None:
+        self.name = name
+        self.level = level
+        self._output = __import__("sys").stderr
+
+    def _log(
+        self,
+        level: int,
+        level_name: str,
+        message: str,
+        **context: JSONValue,
+    ) -> None:
+        if level < self.level:
+            return
+
+        import json
+        from time import time
+
+        entry: JSONObject = {
+            "timestamp": time(),
+            "level": level_name,
+            "logger": self.name,
+            "message": message,
+        }
+        if context:
+            entry["context"] = {k: v for k, v in context.items() if v is not None}
+
+        self._output.write(json.dumps(entry, default=str) + "\n")
+        self._output.flush()
+
+    def debug(self, message: str, **context: JSONValue) -> None:
+        self._log(LogLevel.DEBUG, "DEBUG", message, **context)
+
+    def info(self, message: str, **context: JSONValue) -> None:
+        self._log(LogLevel.INFO, "INFO", message, **context)
+
+    def warning(self, message: str, **context: JSONValue) -> None:
+        self._log(LogLevel.WARNING, "WARNING", message, **context)
+
+    def error(self, message: str, **context: JSONValue) -> None:
+        self._log(LogLevel.ERROR, "ERROR", message, **context)
+
+    def exception(self, message: str, exc: Exception | None = None, **context: JSONValue) -> None:
+        ctx = dict(context)
+        if exc is not None:
+            ctx["exception_type"] = type(exc).__name__
+            ctx["exception_message"] = str(exc)
+        self._log(LogLevel.ERROR, "ERROR", message, **ctx)
 
 
 def deep_copy_json(value: JSONValue) -> JSONValue:
@@ -145,3 +217,126 @@ class InterruptMetadata:
             allow_free_text=bool(payload.get("allow_free_text", False)),
             details=deep_copy_json_object(details_payload),
         )
+
+
+class Timer:
+    """Simple timer for performance measurements.
+
+    Usage:
+        with Timer() as timer:
+            do_work()
+        print(f"Elapsed: {timer.elapsed_seconds:.3f}s")
+    """
+
+    def __init__(self) -> None:
+        from time import monotonic
+
+        self._start: float = monotonic()
+        self._end: float | None = None
+
+    def __enter__(self) -> "Timer":
+        from time import monotonic
+
+        self._start = monotonic()
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        from time import monotonic
+
+        self._end = monotonic()
+
+    @property
+    def elapsed_seconds(self) -> float:
+        from time import monotonic
+
+        if self._end is not None:
+            return self._end - self._start
+        return monotonic() - self._start
+
+
+def get_logger(name: str, level: int = LogLevel.INFO) -> StructuredLogger:
+    """Factory function to create a structured logger."""
+    return StructuredLogger(name, level)
+
+
+class RequestContext:
+    """Thread-safe request context for tracing.
+
+    Usage:
+        with RequestContext.set_current("req-123"):
+            # All operations within this context have access to request_id
+            process_request()
+    """
+
+    _local = threading.local()
+
+    @classmethod
+    def set_current(cls, request_id: str | None) -> "RequestContext":
+        """Set the current request ID for this context."""
+        ctx = cls()
+        ctx.request_id = request_id
+        cls._local.current = ctx
+        return ctx
+
+    @classmethod
+    def get_current(cls) -> "RequestContext | None":
+        """Get the current request context."""
+        return getattr(cls._local, "current", None)
+
+    @classmethod
+    def get_request_id(cls) -> str | None:
+        """Get the current request ID."""
+        ctx = cls.get_current()
+        return ctx.request_id if ctx else None
+
+    @classmethod
+    def generate_id(cls) -> str:
+        """Generate a new unique request ID."""
+        return f"req_{uuid4().hex[:16]}"
+
+    def __enter__(self) -> "RequestContext":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        """Clear context on exit."""
+        type(self)._local.current = None
+
+
+T = TypeVar("T")
+
+
+def retry_with_backoff(
+    max_retries: int = 3,
+    base_delay: float = 1.0,
+    max_delay: float = 60.0,
+    retryable_exceptions: tuple[type[Exception], ...] = (Exception,),
+) -> Callable[[Callable[..., T]], Callable[..., T]]:
+    """Decorator that retries a function with exponential backoff.
+
+    Only retries on specified exception types. Non-retryable exceptions
+    are raised immediately.
+    """
+
+    def decorator(func: Callable[..., T]) -> Callable[..., T]:
+        @wraps(func)
+        def wrapper(*args, **kwargs) -> T:
+            last_exception: Exception | None = None
+
+            for attempt in range(max_retries + 1):
+                try:
+                    return func(*args, **kwargs)
+                except retryable_exceptions as exc:
+                    last_exception = exc
+                    if attempt >= max_retries:
+                        raise
+
+                    delay = min(base_delay * (2 ** attempt), max_delay)
+                    sleep(delay)
+
+            if last_exception is not None:
+                raise last_exception
+            raise RuntimeError("retry loop exited without result or exception")
+
+        return wrapper
+
+    return decorator

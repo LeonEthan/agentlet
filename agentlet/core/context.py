@@ -114,7 +114,22 @@ ContextHistoryEntry = Message | SessionRecord | JSONObject
 
 
 class ContextBuilder:
-    """Build model-facing messages from explicit context sources."""
+    """Build model-facing messages from explicit context sources.
+
+    Supports sliding window context management for large session histories.
+    When max_history_messages is set, keeps the most recent messages while
+    preserving the first system message and current task context.
+    """
+
+    def __init__(self, max_history_messages: int | None = None) -> None:
+        """Initialize with optional context window limit.
+
+        Args:
+            max_history_messages: Maximum number of history messages to include.
+                None means no limit. When set, uses sliding window to keep
+                most recent messages.
+        """
+        self.max_history_messages = max_history_messages
 
     def build(
         self,
@@ -136,7 +151,9 @@ class ContextBuilder:
         if memory_message is not None:
             messages.append(memory_message)
 
-        messages.extend(self._normalize_history(session_history))
+        history = self._normalize_history(session_history)
+        history = self._apply_context_window(history)
+        messages.extend(history)
 
         interrupt_message = self._build_pending_interrupt(pending_interrupt)
         if interrupt_message is not None:
@@ -213,3 +230,19 @@ class ContextBuilder:
         if not content.strip():
             return None
         return content
+
+    def _apply_context_window(self, history: list[Message]) -> list[Message]:
+        """Apply sliding window to limit context size.
+
+        Preserves the beginning of history (earlier context) while truncating
+        from the middle if needed. This maintains the most recent conversation
+        flow while potentially losing older context.
+        """
+        if self.max_history_messages is None:
+            return history
+
+        if len(history) <= self.max_history_messages:
+            return history
+
+        # Keep most recent messages, drop older ones
+        return history[-self.max_history_messages:]

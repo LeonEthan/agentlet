@@ -422,3 +422,140 @@ class TestDefaultsTypeValidation:
 
         assert "bash_timeout_seconds" in str(exc_info.value)
         assert "must be greater than 0" in str(exc_info.value)
+
+
+def test_configuration_error_includes_suggestion():
+    """Test that ConfigurationError includes helpful suggestions."""
+    from agentlet.config.settings import ConfigurationError
+
+    error = ConfigurationError("Missing config", "Set AGENTLET_MODEL")
+
+    assert "Missing config" in str(error)
+    assert "Set AGENTLET_MODEL" in str(error)
+
+
+def test_validate_required_env_success():
+    """Test validation passes when env vars are set."""
+    from agentlet.config.settings import validate_required_env
+
+    # Mock environment
+    import os
+    original_model = os.environ.get("AGENTLET_MODEL")
+    original_key = os.environ.get("AGENTLET_API_KEY")
+
+    try:
+        os.environ["AGENTLET_MODEL"] = "gpt-4"
+        os.environ["AGENTLET_API_KEY"] = "test-key"
+
+        result = validate_required_env()
+
+        assert result["AGENTLET_MODEL"] == "gpt-4"
+        assert result["AGENTLET_API_KEY"] == "test-key"
+    finally:
+        # Restore
+        if original_model is not None:
+            os.environ["AGENTLET_MODEL"] = original_model
+        else:
+            os.environ.pop("AGENTLET_MODEL", None)
+        if original_key is not None:
+            os.environ["AGENTLET_API_KEY"] = original_key
+        else:
+            os.environ.pop("AGENTLET_API_KEY", None)
+
+
+def test_validate_required_env_missing():
+    """Test validation fails when env vars are missing."""
+    from agentlet.config.settings import ConfigurationError, validate_required_env
+
+    # Mock empty environment
+    import os
+    original_model = os.environ.get("AGENTLET_MODEL")
+    original_key = os.environ.get("AGENTLET_API_KEY")
+
+    try:
+        os.environ.pop("AGENTLET_MODEL", None)
+        os.environ.pop("AGENTLET_API_KEY", None)
+
+        with pytest.raises(ConfigurationError) as exc_info:
+            validate_required_env()
+
+        assert "AGENTLET_MODEL" in str(exc_info.value)
+        assert "AGENTLET_API_KEY" in str(exc_info.value)
+    finally:
+        # Restore
+        if original_model is not None:
+            os.environ["AGENTLET_MODEL"] = original_model
+        if original_key is not None:
+            os.environ["AGENTLET_API_KEY"] = original_key
+
+
+def test_detect_common_issues_mismatched_provider():
+    """Test detection of mismatched provider and model."""
+    from agentlet.config.settings import detect_common_issues
+
+    import os
+    original_provider = os.environ.get("AGENTLET_PROVIDER")
+    original_model = os.environ.get("AGENTLET_MODEL")
+
+    try:
+        os.environ["AGENTLET_PROVIDER"] = "anthropic"
+        os.environ["AGENTLET_MODEL"] = "gpt-4"
+
+        warnings = detect_common_issues()
+
+        assert any("claude" in w for w in warnings)
+    finally:
+        if original_provider is not None:
+            os.environ["AGENTLET_PROVIDER"] = original_provider
+        else:
+            os.environ.pop("AGENTLET_PROVIDER", None)
+        if original_model is not None:
+            os.environ["AGENTLET_MODEL"] = original_model
+        else:
+            os.environ.pop("AGENTLET_MODEL", None)
+
+
+def test_detect_common_issues_localhost_warning():
+    """Test detection of localhost URLs."""
+    from agentlet.config.settings import detect_common_issues
+
+    import os
+    original_url = os.environ.get("AGENTLET_BASE_URL")
+
+    try:
+        os.environ["AGENTLET_BASE_URL"] = "http://localhost:8080/v1"
+
+        warnings = detect_common_issues()
+
+        assert any("local" in w.lower() for w in warnings)
+    finally:
+        if original_url is not None:
+            os.environ["AGENTLET_BASE_URL"] = original_url
+        else:
+            os.environ.pop("AGENTLET_BASE_URL", None)
+
+
+def test_detect_common_issues_no_issues():
+    """Test detection with valid configuration."""
+    from agentlet.config.settings import detect_common_issues
+
+    import os
+    original_provider = os.environ.get("AGENTLET_PROVIDER")
+    original_model = os.environ.get("AGENTLET_MODEL")
+    original_url = os.environ.get("AGENTLET_BASE_URL")
+
+    try:
+        os.environ["AGENTLET_PROVIDER"] = "openai"
+        os.environ["AGENTLET_MODEL"] = "gpt-4"
+        os.environ.pop("AGENTLET_BASE_URL", None)
+
+        warnings = detect_common_issues()
+
+        assert warnings == []
+    finally:
+        if original_provider is not None:
+            os.environ["AGENTLET_PROVIDER"] = original_provider
+        if original_model is not None:
+            os.environ["AGENTLET_MODEL"] = original_model
+        if original_url is not None:
+            os.environ["AGENTLET_BASE_URL"] = original_url
