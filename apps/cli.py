@@ -5,10 +5,9 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from pathlib import Path
 from typing import Any, Protocol, Sequence, TextIO
 
-from agentlet.config import SettingsLoader, apply_env_from_settings, load_settings
+from agentlet.config import apply_env_from_settings, load_settings
 from agentlet.core.interrupts import (
     ApprovalRequest,
     ApprovalResponse,
