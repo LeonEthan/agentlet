@@ -5,8 +5,9 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from typing import Protocol, Sequence, TextIO
+from typing import Any, Protocol, Sequence, TextIO
 
+from agentlet.config import apply_env_from_settings, load_settings
 from agentlet.core.interrupts import (
     ApprovalRequest,
     ApprovalResponse,
@@ -139,7 +140,17 @@ def main(
 ) -> int:
     """Run the terminal app with runtime-owned orchestration and approvals."""
 
-    parser = _build_parser()
+    # 1. Load user settings and apply environment variables
+    try:
+        settings = load_settings()
+        apply_env_from_settings(settings)
+    except ValueError as exc:
+        sys.stderr.write(f"Configuration error: {exc}\n")
+        sys.stderr.flush()
+        return 2
+
+    # 2. Build parser with settings defaults
+    parser = _build_parser(defaults=settings.defaults)
     args = parser.parse_args(list(argv) if argv is not None else None)
     resolved_stdin = stdin or sys.stdin
     resolved_stdout = stdout or sys.stdout
@@ -175,30 +186,48 @@ def main(
     return _render_outcome(outcome, stdout=resolved_stdout)
 
 
-def _build_parser() -> argparse.ArgumentParser:
+def _build_parser(defaults: dict[str, Any] | None = None) -> argparse.ArgumentParser:
+    """Build argument parser with optional defaults from settings file."""
+    defaults = defaults or {}
+
     parser = argparse.ArgumentParser(prog="agentlet")
     parser.add_argument("task", nargs="?", help="Task to hand to the agent.")
     parser.add_argument(
         "--workspace-root",
-        default=".",
+        default=defaults.get("workspace_root", "."),
         help="Workspace directory exposed to the built-in coding tools.",
     )
     parser.add_argument(
         "--state-dir",
-        default=".agentlet",
+        default=defaults.get("state_dir", ".agentlet"),
         help="Directory used for session and memory files when explicit paths are omitted.",
     )
     parser.add_argument(
         "--session-path",
+        default=defaults.get("session_path"),
         help="JSONL session history path. Defaults under the state directory.",
     )
     parser.add_argument(
         "--memory-path",
+        default=defaults.get("memory_path"),
         help="Markdown durable memory path. Defaults under the state directory.",
     )
     parser.add_argument(
         "--instructions-path",
+        default=defaults.get("instructions_path"),
         help="Instructions file path. Defaults to AGENTS.md in the workspace when present.",
+    )
+    parser.add_argument(
+        "--max-iterations",
+        type=int,
+        default=defaults.get("max_iterations"),
+        help="Maximum tool call iterations per turn.",
+    )
+    parser.add_argument(
+        "--bash-timeout-seconds",
+        type=float,
+        default=defaults.get("bash_timeout_seconds"),
+        help="Default timeout for Bash tool execution.",
     )
     return parser
 
@@ -207,6 +236,11 @@ def _build_runtime_app_from_args(
     args: argparse.Namespace,
     user_io: TerminalUserIO,
 ) -> RuntimeApp:
+    kwargs: dict[str, Any] = {}
+    if args.max_iterations is not None:
+        kwargs["max_iterations"] = args.max_iterations
+    if args.bash_timeout_seconds is not None:
+        kwargs["bash_timeout_seconds"] = args.bash_timeout_seconds
     return build_default_runtime_app(
         user_io=user_io,
         workspace_root=args.workspace_root,
@@ -214,6 +248,7 @@ def _build_runtime_app_from_args(
         session_path=args.session_path,
         memory_path=args.memory_path,
         instructions_path=args.instructions_path,
+        **kwargs,
     )
 
 

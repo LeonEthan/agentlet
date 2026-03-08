@@ -397,18 +397,23 @@ History truncation, if needed later, should be logical rather than destructive.
 
 ## Runtime Configuration
 
-The default CLI runtime is assembled from:
+The default CLI runtime is assembled from (high to low priority):
 
-- environment variables
-  - `AGENTLET_MODEL`
-  - `AGENTLET_API_KEY`
-  - optional `AGENTLET_BASE_URL`
-- CLI arguments
-  - `--workspace-root`
-  - `--state-dir`
-  - `--session-path`
-  - `--memory-path`
-  - `--instructions-path`
+1. CLI arguments
+   - `--workspace-root`
+   - `--state-dir`
+   - `--session-path`
+   - `--memory-path`
+   - `--instructions-path`
+   - `--max-iterations`
+   - `--bash-timeout-seconds`
+2. Environment variables (system env vars take precedence over settings file)
+   - `AGENTLET_MODEL`
+   - `AGENTLET_API_KEY`
+   - optional `AGENTLET_BASE_URL`
+3. User settings file (`~/.agentlet/settings.json`)
+   - `env` - environment variables to set if not already defined
+   - `defaults` - default values for CLI arguments
 
 `workspace-root` is the boundary exposed to file-system tools and to relative
 `Bash` working-directory resolution. It is not a shell sandbox for arbitrary
