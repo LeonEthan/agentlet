@@ -195,20 +195,6 @@ def test_runtime_app_auto_resolves_approval_requests(tmp_path) -> None:
                 finish_reason="tool_calls",
             ),
             ModelResponse(
-                message=Message(
-                    role="assistant",
-                    content="Proceeding with the approved write.",
-                    tool_calls=(
-                        ToolCall(
-                            id="call_write",
-                            name="Write",
-                            arguments={"path": "notes.md", "content": "hello"},
-                        ),
-                    ),
-                ),
-                finish_reason="tool_calls",
-            ),
-            ModelResponse(
                 message=Message(role="assistant", content="Done."),
                 finish_reason="stop",
             ),

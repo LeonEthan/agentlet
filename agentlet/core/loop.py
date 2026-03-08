@@ -169,15 +169,16 @@ class AgentLoop:
                 raise ValueError(
                     "approval resume request_id has already been consumed"
                 )
-        pending_interrupt = _pending_interrupt_from_resume(resume)
+        pending_interrupt = _question_interrupt_from_resume(resume)
 
+        delay_current_task = pending_approval is not None
         working_messages = list(
             self.context_builder.build(
                 system_instructions=system_instructions,
                 session_history=session_history,
                 durable_memory=durable_memory,
                 pending_interrupt=pending_interrupt,
-                current_task=current_task,
+                current_task=None if delay_current_task else current_task,
             )
         )
         if not working_messages:
@@ -185,8 +186,62 @@ class AgentLoop:
 
         new_messages = _new_input_messages(
             pending_interrupt=pending_interrupt,
-            current_task=current_task,
+            current_task=None if delay_current_task else current_task,
         )
+        extra_records: list[SessionRecord] = []
+
+        if pending_approval is not None:
+            approval_request = _require_approval_request(
+                pending_approval,
+                existing_records,
+            )
+            assistant_message, approved_tool_call = _require_approved_tool_call(
+                approval_request,
+                existing_records,
+            )
+            extra_records.append(
+                SessionRecord(
+                    record_id=f"approval_response:{pending_approval.request_id}",
+                    kind="approval_response",
+                    payload=pending_approval.as_dict(),
+                )
+            )
+            if pending_approval.decision == "approved":
+                tool_message, interrupted_turn = self._execute_tool_call(
+                    tool_call=approved_tool_call,
+                    assistant_message=assistant_message,
+                )
+            else:
+                tool_message = _tool_message_from_result(
+                    approved_tool_call,
+                    ToolResult.error(
+                        output=(
+                            f"Tool `{approved_tool_call.name}` was not executed because approval "
+                            "was rejected."
+                        ),
+                        metadata={
+                            "tool_name": approved_tool_call.name,
+                            "error_type": "ApprovalRejected",
+                            "request_id": pending_approval.request_id,
+                        },
+                    ),
+                )
+                interrupted_turn = None
+            working_messages.append(tool_message)
+            new_messages.append(tool_message)
+
+            delayed_task_message = _current_task_message(current_task)
+            if delayed_task_message is not None:
+                working_messages.append(delayed_task_message)
+                new_messages.append(delayed_task_message)
+
+            if interrupted_turn is not None:
+                self._persist_messages(
+                    existing_records,
+                    new_messages,
+                    extra_records=extra_records,
+                )
+                return interrupted_turn
 
         for _ in range(self.max_iterations):
             response = self.model.complete(self._build_request(working_messages))
@@ -201,7 +256,11 @@ class AgentLoop:
                 )
 
             if not assistant_message.tool_calls:
-                self._persist_messages(existing_records, new_messages)
+                self._persist_messages(
+                    existing_records,
+                    new_messages,
+                    extra_records=extra_records,
+                )
                 return CompletedTurn(
                     message=assistant_message,
                     usage=response.usage,
@@ -226,7 +285,7 @@ class AgentLoop:
                     self._persist_messages(
                         existing_records,
                         new_messages,
-                        extra_records=[
+                        extra_records=extra_records + [
                             SessionRecord(
                                 record_id=approval_resolution.request.request_id,
                                 kind="approval_request",
@@ -255,7 +314,11 @@ class AgentLoop:
                 new_messages.append(tool_message)
 
                 if interrupted_turn is not None:
-                    self._persist_messages(existing_records, new_messages)
+                    self._persist_messages(
+                        existing_records,
+                        new_messages,
+                        extra_records=extra_records,
+                    )
                     return interrupted_turn
 
         raise RuntimeError(
@@ -466,7 +529,7 @@ def _tool_message_from_result(tool_call: ToolCall, result: ToolResult) -> Messag
     )
 
 
-def _pending_interrupt_from_resume(
+def _question_interrupt_from_resume(
     resume: ResumeRequest | None,
 ) -> PendingInterruptContext | None:
     if resume is None:
@@ -474,13 +537,7 @@ def _pending_interrupt_from_resume(
 
     payload = resume.payload
     if resume.kind == "approval":
-        return PendingInterruptContext(
-            kind="approval",
-            request_id=payload.request_id,
-            decision=payload.decision,
-            comment=payload.comment,
-            details=payload.details,
-        )
+        return None
 
     return PendingInterruptContext(
         kind="question",
@@ -489,6 +546,55 @@ def _pending_interrupt_from_resume(
         free_text=payload.free_text,
         details=payload.details,
     )
+
+
+def _require_approval_request(
+    response: ApprovalResponse,
+    existing_records: list[SessionRecord],
+) -> ApprovalRequest:
+    request, _ = _approval_request_for_response(response, existing_records)
+    if request is None:
+        raise ValueError(
+            "approval resume request_id does not match a persisted approval request"
+        )
+    return request
+
+
+def _require_approved_tool_call(
+    request: ApprovalRequest,
+    existing_records: list[SessionRecord],
+) -> tuple[Message, ToolCall]:
+    tool_call_id = request.details.get("tool_call_id")
+    matched_assistant: Message | None = None
+    matched_tool_call: ToolCall | None = None
+
+    for record in reversed(existing_records):
+        if record.kind != "message":
+            continue
+        try:
+            message = Message.from_dict(record.payload)
+        except (TypeError, ValueError):
+            continue
+        if message.role != "assistant":
+            continue
+        for tool_call in message.tool_calls:
+            if isinstance(tool_call_id, str) and tool_call.id == tool_call_id:
+                return message, tool_call
+            if _approval_request_matches_tool_call(request, tool_call):
+                matched_assistant = message
+                matched_tool_call = tool_call
+        if matched_assistant is not None and matched_tool_call is not None:
+            return matched_assistant, matched_tool_call
+
+    raise ValueError(
+        "approval resume request_id does not match a persisted tool call"
+    )
+
+
+def _pending_interrupt_from_resume(
+    resume: ResumeRequest | None,
+) -> PendingInterruptContext | None:
+    return _question_interrupt_from_resume(resume)
 
 
 def _approval_response_from_resume(
@@ -650,6 +756,12 @@ def _resume_already_consumed(
     records: list[SessionRecord],
 ) -> bool:
     for record in records:
+        if (
+            kind == "approval"
+            and record.kind == "approval_response"
+            and record.payload.get("request_id") == request_id
+        ):
+            return True
         if record.kind != "message":
             continue
         try:

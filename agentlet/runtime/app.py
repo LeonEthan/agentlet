@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Mapping
+from typing import Literal, Mapping
 
 from agentlet.core.approvals import ApprovalPolicy
 from agentlet.core.context import ContextBuilder, CurrentTaskState
@@ -18,6 +18,17 @@ from agentlet.core.loop import (
 )
 from agentlet.core.types import JSONObject, deep_copy_json_object
 from agentlet.llm.base import ModelClient
+from agentlet.llm.anthropic import (
+    AnthropicModelClient,
+    DEFAULT_ANTHROPIC_BASE_URL,
+    DEFAULT_ANTHROPIC_VERSION,
+    build_anthropic_transport,
+)
+from agentlet.llm.openai import (
+    DEFAULT_OPENAI_BASE_URL,
+    OpenAIModelClient,
+    build_openai_transport,
+)
 from agentlet.llm.openai_like import OpenAILikeModelClient, build_openai_like_transport
 from agentlet.llm.schemas import ToolChoice
 from agentlet.memory import MemoryStore, SessionStore
@@ -36,7 +47,64 @@ from agentlet.tools.web.search import WebSearchTool
 
 
 RuntimeRunOutcome = CompletedTurn | InterruptedTurn
-DEFAULT_OPENAI_LIKE_BASE_URL = "https://api.openai.com/v1"
+ProviderName = Literal["openai", "anthropic", "openai_like"]
+VALID_PROVIDER_NAMES = {"openai", "anthropic", "openai_like"}
+PROVIDER_NAME_ALIASES = {"openai-like": "openai_like"}
+DEFAULT_PROVIDER: ProviderName = "openai"
+DEFAULT_OPENAI_LIKE_BASE_URL = DEFAULT_OPENAI_BASE_URL
+
+
+def _validate_common_provider_settings(
+    *,
+    model: str,
+    api_key: str,
+    timeout_seconds: float,
+    request_defaults: JSONObject,
+) -> JSONObject:
+    if not model.strip():
+        raise ValueError("model must not be empty")
+    if not api_key.strip():
+        raise ValueError("api_key must not be empty")
+    if timeout_seconds <= 0:
+        raise ValueError("timeout_seconds must be > 0")
+    return deep_copy_json_object(request_defaults)
+
+
+def _require_env(env: Mapping[str, str], key: str) -> str:
+    value = env.get(key, "").strip()
+    if not value:
+        raise ValueError(f"{key} must be set.")
+    return value
+
+
+def _read_positive_int_env(env: Mapping[str, str], key: str) -> int:
+    raw_value = _require_env(env, key)
+    try:
+        value = int(raw_value)
+    except ValueError as exc:
+        raise ValueError(f"{key} must be an integer.") from exc
+    if value <= 0:
+        raise ValueError(f"{key} must be > 0.")
+    return value
+
+
+def _normalize_provider_name(
+    provider: str | None,
+    env: Mapping[str, str],
+) -> ProviderName:
+    raw_provider = (
+        provider.strip()
+        if provider is not None and provider.strip()
+        else env.get("AGENTLET_PROVIDER", "").strip()
+    )
+    if not raw_provider:
+        raw_provider = "openai_like" if env.get("AGENTLET_BASE_URL", "").strip() else DEFAULT_PROVIDER
+    raw_provider = PROVIDER_NAME_ALIASES.get(raw_provider, raw_provider)
+    if raw_provider not in VALID_PROVIDER_NAMES:
+        raise ValueError(
+            "AGENTLET_PROVIDER must be one of: anthropic, openai, openai-like, openai_like."
+        )
+    return raw_provider  # type: ignore[return-value]
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,7 +188,12 @@ class OpenAILikeConfig:
         object.__setattr__(
             self,
             "request_defaults",
-            deep_copy_json_object(self.request_defaults),
+            _validate_common_provider_settings(
+                model=self.model,
+                api_key=self.api_key,
+                timeout_seconds=self.timeout_seconds,
+                request_defaults=self.request_defaults,
+            ),
         )
 
     @classmethod
@@ -147,6 +220,172 @@ class OpenAILikeConfig:
             timeout_seconds=timeout_seconds,
             request_defaults=request_defaults or {},
         )
+
+
+@dataclass(frozen=True, slots=True)
+class OpenAIConfig:
+    """Configuration used to assemble the official OpenAI model client."""
+
+    model: str
+    api_key: str
+    timeout_seconds: float = 60.0
+    request_defaults: JSONObject = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "request_defaults",
+            _validate_common_provider_settings(
+                model=self.model,
+                api_key=self.api_key,
+                timeout_seconds=self.timeout_seconds,
+                request_defaults=self.request_defaults,
+            ),
+        )
+
+    @classmethod
+    def from_env(
+        cls,
+        environ: Mapping[str, str] | None = None,
+        *,
+        request_defaults: JSONObject | None = None,
+        timeout_seconds: float = 60.0,
+    ) -> "OpenAIConfig":
+        """Load OpenAI provider settings from the process environment."""
+
+        env = os.environ if environ is None else environ
+        return cls(
+            model=_require_env(env, "AGENTLET_MODEL"),
+            api_key=_require_env(env, "AGENTLET_API_KEY"),
+            timeout_seconds=timeout_seconds,
+            request_defaults=request_defaults or {},
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class AnthropicConfig:
+    """Configuration used to assemble the Anthropic model client."""
+
+    model: str
+    api_key: str
+    max_output_tokens: int
+    anthropic_version: str = DEFAULT_ANTHROPIC_VERSION
+    base_url: str = DEFAULT_ANTHROPIC_BASE_URL
+    timeout_seconds: float = 60.0
+    request_defaults: JSONObject = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not self.anthropic_version.strip():
+            raise ValueError("anthropic_version must not be empty")
+        if not self.base_url.strip():
+            raise ValueError("base_url must not be empty")
+        if self.max_output_tokens <= 0:
+            raise ValueError("max_output_tokens must be > 0")
+        object.__setattr__(
+            self,
+            "request_defaults",
+            _validate_common_provider_settings(
+                model=self.model,
+                api_key=self.api_key,
+                timeout_seconds=self.timeout_seconds,
+                request_defaults=self.request_defaults,
+            ),
+        )
+
+    @classmethod
+    def from_env(
+        cls,
+        environ: Mapping[str, str] | None = None,
+        *,
+        request_defaults: JSONObject | None = None,
+        timeout_seconds: float = 60.0,
+    ) -> "AnthropicConfig":
+        """Load Anthropic provider settings from the process environment."""
+
+        env = os.environ if environ is None else environ
+        return cls(
+            model=_require_env(env, "AGENTLET_MODEL"),
+            api_key=_require_env(env, "AGENTLET_API_KEY"),
+            max_output_tokens=_read_positive_int_env(
+                env,
+                "AGENTLET_MAX_OUTPUT_TOKENS",
+            ),
+            anthropic_version=env.get(
+                "AGENTLET_ANTHROPIC_VERSION",
+                DEFAULT_ANTHROPIC_VERSION,
+            ),
+            base_url=env.get("AGENTLET_BASE_URL", DEFAULT_ANTHROPIC_BASE_URL),
+            timeout_seconds=timeout_seconds,
+            request_defaults=request_defaults or {},
+        )
+
+
+ModelProviderConfig = OpenAIConfig | OpenAILikeConfig | AnthropicConfig
+
+
+def load_model_provider_config(
+    environ: Mapping[str, str] | None = None,
+    *,
+    provider: str | None = None,
+    request_defaults: JSONObject | None = None,
+    timeout_seconds: float = 60.0,
+) -> ModelProviderConfig:
+    """Resolve one concrete provider config from environment-backed settings."""
+
+    env = os.environ if environ is None else environ
+    provider_name = _normalize_provider_name(provider, env)
+    if provider_name == "openai":
+        return OpenAIConfig.from_env(
+            env,
+            request_defaults=request_defaults,
+            timeout_seconds=timeout_seconds,
+        )
+    if provider_name == "anthropic":
+        return AnthropicConfig.from_env(
+            env,
+            request_defaults=request_defaults,
+            timeout_seconds=timeout_seconds,
+        )
+    return OpenAILikeConfig.from_env(
+        env,
+        request_defaults=request_defaults,
+        timeout_seconds=timeout_seconds,
+    )
+
+
+def build_model_client(config: ModelProviderConfig) -> ModelClient:
+    """Build one concrete provider client from runtime configuration."""
+
+    if isinstance(config, OpenAIConfig):
+        return OpenAIModelClient(
+            model=config.model,
+            transport=build_openai_transport(
+                api_key=config.api_key,
+                timeout_seconds=config.timeout_seconds,
+            ),
+            request_defaults=config.request_defaults,
+        )
+    if isinstance(config, AnthropicConfig):
+        return AnthropicModelClient(
+            model=config.model,
+            max_output_tokens=config.max_output_tokens,
+            transport=build_anthropic_transport(
+                api_key=config.api_key,
+                anthropic_version=config.anthropic_version,
+                base_url=config.base_url,
+                timeout_seconds=config.timeout_seconds,
+            ),
+            request_defaults=config.request_defaults,
+        )
+    return OpenAILikeModelClient(
+        model=config.model,
+        transport=build_openai_like_transport(
+            base_url=config.base_url,
+            api_key=config.api_key,
+            timeout_seconds=config.timeout_seconds,
+        ),
+        request_defaults=config.request_defaults,
+    )
 
 
 @dataclass(slots=True)
@@ -281,15 +520,75 @@ def build_openai_like_runtime_app(
 ) -> RuntimeApp:
     """Assemble a runtime app using the built-in OpenAI-like provider client."""
 
-    client = OpenAILikeModelClient(
-        model=config.model,
-        transport=build_openai_like_transport(
-            base_url=config.base_url,
-            api_key=config.api_key,
-            timeout_seconds=config.timeout_seconds,
-        ),
-        request_defaults=config.request_defaults,
+    client = build_model_client(config)
+    return build_runtime_app(
+        model=client,
+        user_io=user_io,
+        workspace_root=workspace_root,
+        state_dir=state_dir,
+        session_path=session_path,
+        memory_path=memory_path,
+        instructions_path=instructions_path,
+        approval_policy=approval_policy,
+        context_builder=context_builder,
+        tool_choice=tool_choice,
+        max_iterations=max_iterations,
+        bash_timeout_seconds=bash_timeout_seconds,
     )
+
+
+def build_openai_runtime_app(
+    *,
+    user_io: UserIO,
+    workspace_root: str | Path,
+    config: OpenAIConfig,
+    state_dir: str | Path = ".agentlet",
+    session_path: str | Path | None = None,
+    memory_path: str | Path | None = None,
+    instructions_path: str | Path | None = None,
+    approval_policy: ApprovalPolicy | None = None,
+    context_builder: ContextBuilder | None = None,
+    tool_choice: ToolChoice | None = None,
+    max_iterations: int = 8,
+    bash_timeout_seconds: float | None = None,
+) -> RuntimeApp:
+    """Assemble a runtime app using the official OpenAI provider client."""
+
+    client = build_model_client(config)
+    return build_runtime_app(
+        model=client,
+        user_io=user_io,
+        workspace_root=workspace_root,
+        state_dir=state_dir,
+        session_path=session_path,
+        memory_path=memory_path,
+        instructions_path=instructions_path,
+        approval_policy=approval_policy,
+        context_builder=context_builder,
+        tool_choice=tool_choice,
+        max_iterations=max_iterations,
+        bash_timeout_seconds=bash_timeout_seconds,
+    )
+
+
+def build_anthropic_runtime_app(
+    *,
+    user_io: UserIO,
+    workspace_root: str | Path,
+    config: AnthropicConfig,
+    state_dir: str | Path = ".agentlet",
+    session_path: str | Path | None = None,
+    memory_path: str | Path | None = None,
+    instructions_path: str | Path | None = None,
+    approval_policy: ApprovalPolicy | None = None,
+    context_builder: ContextBuilder | None = None,
+    tool_choice: ToolChoice | None = None,
+    max_iterations: int = 8,
+    bash_timeout_seconds: float | None = None,
+) -> RuntimeApp:
+    """Assemble a runtime app using the Anthropic provider client."""
+
+    client = build_model_client(config)
     return build_runtime_app(
         model=client,
         user_io=user_io,
@@ -319,14 +618,46 @@ def build_default_runtime_app(
     tool_choice: ToolChoice | None = None,
     max_iterations: int = 8,
     bash_timeout_seconds: float | None = None,
+    provider: str | None = None,
     environ: Mapping[str, str] | None = None,
 ) -> RuntimeApp:
     """Assemble the default terminal runtime from environment-backed settings."""
 
+    config = load_model_provider_config(environ, provider=provider)
+    if isinstance(config, OpenAIConfig):
+        return build_openai_runtime_app(
+            user_io=user_io,
+            workspace_root=workspace_root,
+            config=config,
+            state_dir=state_dir,
+            session_path=session_path,
+            memory_path=memory_path,
+            instructions_path=instructions_path,
+            approval_policy=approval_policy,
+            context_builder=context_builder,
+            tool_choice=tool_choice,
+            max_iterations=max_iterations,
+            bash_timeout_seconds=bash_timeout_seconds,
+        )
+    if isinstance(config, AnthropicConfig):
+        return build_anthropic_runtime_app(
+            user_io=user_io,
+            workspace_root=workspace_root,
+            config=config,
+            state_dir=state_dir,
+            session_path=session_path,
+            memory_path=memory_path,
+            instructions_path=instructions_path,
+            approval_policy=approval_policy,
+            context_builder=context_builder,
+            tool_choice=tool_choice,
+            max_iterations=max_iterations,
+            bash_timeout_seconds=bash_timeout_seconds,
+        )
     return build_openai_like_runtime_app(
         user_io=user_io,
         workspace_root=workspace_root,
-        config=OpenAILikeConfig.from_env(environ),
+        config=config,
         state_dir=state_dir,
         session_path=session_path,
         memory_path=memory_path,
@@ -379,13 +710,24 @@ def _resolve_path(workspace_root: Path, value: str | Path) -> Path:
 
 
 __all__ = [
+    "AnthropicConfig",
+    "DEFAULT_ANTHROPIC_BASE_URL",
+    "DEFAULT_ANTHROPIC_VERSION",
+    "DEFAULT_OPENAI_BASE_URL",
     "OpenAILikeConfig",
+    "OpenAIConfig",
+    "ProviderName",
     "DEFAULT_OPENAI_LIKE_BASE_URL",
     "RuntimeApp",
     "RuntimePaths",
     "RuntimeRunOutcome",
+    "VALID_PROVIDER_NAMES",
+    "build_anthropic_runtime_app",
     "build_default_registry",
     "build_default_runtime_app",
+    "build_model_client",
+    "build_openai_runtime_app",
     "build_openai_like_runtime_app",
     "build_runtime_app",
+    "load_model_provider_config",
 ]
