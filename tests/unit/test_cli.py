@@ -380,6 +380,7 @@ class TestCliSettingsIntegration:
         settings_file = agentlet_home / "settings.json"
         settings_file.write_text(json.dumps({
             "defaults": {
+                "provider": "anthropic",
                 "workspace_root": str(workspace),
                 "state_dir": str(state_dir),
             },
@@ -394,6 +395,7 @@ class TestCliSettingsIntegration:
         received_args = {}
 
         def capture_app_factory(args, user_io):
+            received_args["provider"] = args.provider
             received_args["workspace_root"] = args.workspace_root
             received_args["state_dir"] = args.state_dir
             return FakeRuntimeApp(
@@ -410,6 +412,7 @@ class TestCliSettingsIntegration:
         )
 
         assert exit_code == 0
+        assert received_args["provider"] == "anthropic"
         assert received_args["workspace_root"] == str(workspace)
         assert received_args["state_dir"] == str(state_dir)
 
@@ -444,13 +447,14 @@ class TestCliSettingsIntegration:
         received_args = {}
 
         def capture_app_factory(args, user_io):
+            received_args["provider"] = args.provider
             received_args["workspace_root"] = args.workspace_root
             return FakeRuntimeApp(
                 CompletedTurn(message=Message(role="assistant", content="Done."))
             )
 
         exit_code = main(
-            ["--workspace-root", str(cli_workspace), "task"],
+            ["--provider", "openai-like", "--workspace-root", str(cli_workspace), "task"],
             stdin=StringIO(),
             stdout=StringIO(),
             stderr=StringIO(),
@@ -459,6 +463,7 @@ class TestCliSettingsIntegration:
 
         assert exit_code == 0
         # CLI argument should override settings default
+        assert received_args["provider"] == "openai-like"
         assert received_args["workspace_root"] == str(cli_workspace)
 
     def test_cli_main_applies_env_from_settings(

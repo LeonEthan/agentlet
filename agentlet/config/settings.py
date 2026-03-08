@@ -24,6 +24,7 @@ class SettingsLoader:
 
     _ALLOWED_TOP_KEYS = {"env", "defaults"}
     _ALLOWED_DEFAULT_KEYS = {
+        "provider",
         "workspace_root",
         "state_dir",
         "session_path",
@@ -97,6 +98,7 @@ class SettingsLoader:
         "memory_path",
         "instructions_path",
     }
+    _DEFAULTS_STRING_KEYS = {"provider"}
     _DEFAULTS_INT_KEYS = {"max_iterations"}
     _DEFAULTS_NUMBER_KEYS = {"bash_timeout_seconds"}
 
@@ -126,7 +128,7 @@ class SettingsLoader:
     def _validate_defaults_types(cls, defaults: dict, path: Path) -> None:
         """Validate that defaults values have correct types."""
         for key, value in defaults.items():
-            if key in cls._DEFAULTS_PATH_KEYS:
+            if key in cls._DEFAULTS_PATH_KEYS or key in cls._DEFAULTS_STRING_KEYS:
                 if not isinstance(value, str):
                     raise ValueError(
                         f"Setting '{key}' in settings file {path} "
@@ -162,6 +164,13 @@ class SettingsLoader:
                 raise ValueError(
                     f"Setting 'bash_timeout_seconds' in settings file {path} "
                     f"must be greater than 0, got {value}"
+                )
+        if "provider" in defaults:
+            value = defaults["provider"]
+            if value not in {"anthropic", "openai", "openai-like", "openai_like"}:
+                raise ValueError(
+                    f"Setting 'provider' in settings file {path} "
+                    "must be one of: anthropic, openai, openai-like, openai_like"
                 )
 
 

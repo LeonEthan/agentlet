@@ -20,10 +20,13 @@ uv sync --dev
 Set the model provider environment:
 
 ```bash
+export AGENTLET_PROVIDER="openai"
 export AGENTLET_MODEL="gpt-4.1-mini"
 export AGENTLET_API_KEY="..."
 # Optional for OpenAI-compatible providers:
 export AGENTLET_BASE_URL="https://api.openai.com/v1"
+# Required for Anthropic providers:
+export AGENTLET_MAX_OUTPUT_TOKENS="1024"
 ```
 
 Or use the settings file at `~/.agentlet/settings.json` (see Configuration section below).
@@ -51,11 +54,13 @@ uv run pytest
 ```json
 {
   "env": {
+    "AGENTLET_PROVIDER": "openai",
     "AGENTLET_MODEL": "gpt-4.1-mini",
     "AGENTLET_API_KEY": "sk-...",
     "AGENTLET_BASE_URL": "https://api.openai.com/v1"
   },
   "defaults": {
+    "provider": "openai",
     "max_iterations": 8,
     "bash_timeout_seconds": 120
   }
@@ -72,11 +77,15 @@ uv run pytest
 ### Settings Reference
 
 **`env` section:**
+- `AGENTLET_PROVIDER` - Provider name: `openai`, `anthropic`, or `openai_like` (`openai-like` is also accepted by the CLI)
 - `AGENTLET_MODEL` - Model name to use
 - `AGENTLET_API_KEY` - API key for the model provider
-- `AGENTLET_BASE_URL` - Optional base URL for OpenAI-compatible providers
+- `AGENTLET_BASE_URL` - Optional base URL for `openai_like`, or Anthropic API override
+- `AGENTLET_MAX_OUTPUT_TOKENS` - Required for `anthropic`
+- `AGENTLET_ANTHROPIC_VERSION` - Optional Anthropic API version override
 
 **`defaults` section:**
+- `provider` - Default CLI provider
 - `workspace_root` - Default workspace directory
 - `state_dir` - Directory for session/memory files
 - `session_path` - Path to JSONL session file

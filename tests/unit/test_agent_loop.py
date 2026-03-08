@@ -526,20 +526,6 @@ def test_agent_loop_executes_approved_tool_call_after_resume() -> None:
     second_model = FakeModelClient(
         [
             ModelResponse(
-                message=Message(
-                    role="assistant",
-                    content="Proceeding with the approved write.",
-                    tool_calls=(
-                        ToolCall(
-                            id="call_0_0",
-                            name="Write",
-                            arguments={"path": "notes.md", "content": "hello"},
-                        ),
-                    ),
-                ),
-                finish_reason="tool_calls",
-            ),
-            ModelResponse(
                 message=Message(role="assistant", content="The file is written."),
                 finish_reason="stop",
             ),
@@ -562,12 +548,89 @@ def test_agent_loop_executes_approved_tool_call_after_resume() -> None:
 
     assert isinstance(outcome, CompletedTurn)
     assert write_tool.executed_arguments == [{"path": "notes.md", "content": "hello"}]
-    assert second_model.requests[1].messages[-1] == Message(
-        role="tool",
+    assert len(second_model.requests) == 1
+    assert second_model.requests[0].messages[-2:] == (
+        Message(
+            role="tool",
+            name="Write",
+            content="Created file: notes.md",
+            tool_call_id="call_0_0",
+            metadata={"tool_name": "Write", "is_error": False},
+        ),
+        Message(role="user", content="Continue the task."),
+    )
+
+
+def test_agent_loop_records_approval_response_when_resume_is_consumed() -> None:
+    write_definition = ToolDefinition(
         name="Write",
-        content="Created file: notes.md",
-        tool_call_id="call_0_0",
-        metadata={"tool_name": "Write", "is_error": False},
+        description="Write description",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "content": {"type": "string"},
+            },
+            "required": ["path", "content"],
+            "additionalProperties": False,
+        },
+        approval_category="mutating",
+    )
+    session_store = FakeSessionStore()
+    first_outcome = AgentLoop(
+        model=FakeModelClient(
+            [
+                ModelResponse(
+                    message=Message(
+                        role="assistant",
+                        content="I should write the file.",
+                        tool_calls=(
+                            ToolCall(
+                                id="call_0_0",
+                                name="Write",
+                                arguments={"path": "notes.md", "content": "hello"},
+                            ),
+                        ),
+                    ),
+                    finish_reason="tool_calls",
+                )
+            ]
+        ),
+        registry=FakeRegistry(
+            [FakeTool(write_definition, result=ToolResult(output="Created file: notes.md"))]
+        ),
+        session_store=session_store,
+    ).run(current_task="Create notes.md")
+
+    assert isinstance(first_outcome, ApprovalRequiredTurn)
+
+    outcome = AgentLoop(
+        model=FakeModelClient(
+            [
+                ModelResponse(
+                    message=Message(role="assistant", content="The file is written."),
+                    finish_reason="stop",
+                )
+            ]
+        ),
+        registry=FakeRegistry(
+            [FakeTool(write_definition, result=ToolResult(output="Created file: notes.md"))]
+        ),
+        session_store=session_store,
+    ).run(
+        resume=ResumeRequest.from_approval_response(
+            ApprovalResponse(
+                request_id=first_outcome.request.request_id,
+                decision="approved",
+            )
+        ),
+    )
+
+    assert isinstance(outcome, CompletedTurn)
+    assert any(
+        record.kind == "approval_response"
+        and record.payload["request_id"] == first_outcome.request.request_id
+        for record in session_store.records
     )
 
 
@@ -616,20 +679,6 @@ def test_agent_loop_enforces_rejected_approval_after_resume() -> None:
     second_model = FakeModelClient(
         [
             ModelResponse(
-                message=Message(
-                    role="assistant",
-                    content="I would write the file.",
-                    tool_calls=(
-                        ToolCall(
-                            id="call_0_0",
-                            name="Write",
-                            arguments={"path": "notes.md", "content": "hello"},
-                        ),
-                    ),
-                ),
-                finish_reason="tool_calls",
-            ),
-            ModelResponse(
                 message=Message(role="assistant", content="The write was skipped."),
                 finish_reason="stop",
             ),
@@ -652,20 +701,24 @@ def test_agent_loop_enforces_rejected_approval_after_resume() -> None:
 
     assert isinstance(outcome, CompletedTurn)
     assert write_tool.executed_arguments == []
-    assert second_model.requests[1].messages[-1] == Message(
-        role="tool",
-        name="Write",
-        content="Tool `Write` was not executed because approval was rejected.",
-        tool_call_id="call_0_0",
-        metadata={
-            "tool_name": "Write",
-            "is_error": True,
-            "result": {
+    assert len(second_model.requests) == 1
+    assert second_model.requests[0].messages[-2:] == (
+        Message(
+            role="tool",
+            name="Write",
+            content="Tool `Write` was not executed because approval was rejected.",
+            tool_call_id="call_0_0",
+            metadata={
                 "tool_name": "Write",
-                "error_type": "ApprovalRejected",
-                "request_id": first_outcome.request.request_id,
+                "is_error": True,
+                "result": {
+                    "tool_name": "Write",
+                    "error_type": "ApprovalRejected",
+                    "request_id": first_outcome.request.request_id,
+                },
             },
-        },
+        ),
+        Message(role="user", content="Continue the task."),
     )
 
 
@@ -838,20 +891,6 @@ def test_agent_loop_accepts_valid_approval_resume_with_later_approval_records() 
     )
     model = FakeModelClient(
         [
-            ModelResponse(
-                message=Message(
-                    role="assistant",
-                    content="Proceeding with the approved write.",
-                    tool_calls=(
-                        ToolCall(
-                            id="call_0_0",
-                            name="Write",
-                            arguments={"path": "notes.md", "content": "hello"},
-                        ),
-                    ),
-                ),
-                finish_reason="tool_calls",
-            ),
             ModelResponse(
                 message=Message(role="assistant", content="The file is written."),
                 finish_reason="stop",

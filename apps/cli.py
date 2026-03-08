@@ -15,8 +15,20 @@ from agentlet.core.interrupts import (
     UserQuestionResponse,
 )
 from agentlet.core.loop import CompletedTurn, InterruptedTurn
-from agentlet.runtime.app import RuntimeApp, build_default_runtime_app
+from agentlet.runtime.app import (
+    RuntimeApp,
+    VALID_PROVIDER_NAMES,
+    build_default_runtime_app,
+)
 from agentlet.runtime.events import RuntimeEvent
+
+
+CLI_PROVIDER_CHOICES = (
+    "anthropic",
+    "openai",
+    "openai-like",
+    *sorted(VALID_PROVIDER_NAMES),
+)
 
 
 class RuntimeAppFactory(Protocol):
@@ -229,6 +241,12 @@ def _build_parser(defaults: dict[str, Any] | None = None) -> argparse.ArgumentPa
         default=defaults.get("bash_timeout_seconds"),
         help="Default timeout for Bash tool execution.",
     )
+    parser.add_argument(
+        "--provider",
+        choices=tuple(dict.fromkeys(CLI_PROVIDER_CHOICES)),
+        default=defaults.get("provider"),
+        help="LLM provider to use.",
+    )
     return parser
 
 
@@ -248,6 +266,7 @@ def _build_runtime_app_from_args(
         session_path=args.session_path,
         memory_path=args.memory_path,
         instructions_path=args.instructions_path,
+        provider=args.provider,
         **kwargs,
     )
 

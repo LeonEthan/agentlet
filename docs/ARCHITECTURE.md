@@ -73,6 +73,8 @@ agentlet/
 │   │   └── types.py
 │   ├── llm/
 │   │   ├── base.py
+│   │   ├── anthropic.py
+│   │   ├── openai.py
 │   │   ├── openai_like.py
 │   │   └── schemas.py
 │   ├── memory/
@@ -138,6 +140,10 @@ Owns model-provider abstraction.
 
 - `base.py`
   - Defines the `ModelClient` protocol.
+- `openai.py`
+  - Defines the official OpenAI transport preset.
+- `anthropic.py`
+  - Implements the Anthropic Messages API adapter.
 - `openai_like.py`
   - Implements one provider adapter for OpenAI-compatible APIs.
 - `schemas.py`
@@ -182,7 +188,7 @@ The framework should begin with readable, local persistence such as JSONL plus m
 Owns app wiring and interactive flow.
 
 - `app.py`
-  - Assembles the configured loop, registry, model client, and stores.
+  - Assembles the configured loop, registry, provider client, and stores.
 - `events.py`
   - Defines runtime-level event envelopes used for observation and rendering.
 - `user_io.py`

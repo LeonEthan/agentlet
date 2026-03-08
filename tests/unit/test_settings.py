@@ -263,6 +263,7 @@ class TestAllAllowedDefaultKeys:
         config_file = tmp_path / "settings.json"
 
         all_defaults = {
+            "provider": "anthropic",
             "workspace_root": "/path/to/workspace",
             "state_dir": ".custom_agentlet",
             "session_path": "/path/to/session.jsonl",
@@ -296,6 +297,20 @@ class TestDefaultsTypeValidation:
         assert "workspace_root" in str(exc_info.value)
         assert "must be a string" in str(exc_info.value)
         assert "bool" in str(exc_info.value)
+
+    def test_provider_rejects_invalid_value(self, tmp_path: Path) -> None:
+        """provider must be one of the supported provider names."""
+        config_file = tmp_path / "settings.json"
+        config_file.write_text(json.dumps({
+            "defaults": {"provider": "bedrock"},
+        }))
+
+        with pytest.raises(ValueError) as exc_info:
+            SettingsLoader.load(config_file)
+
+        assert "provider" in str(exc_info.value)
+        assert "anthropic" in str(exc_info.value)
+        assert "openai-like" in str(exc_info.value)
 
     def test_max_iterations_rejects_non_int(self, tmp_path: Path) -> None:
         """max_iterations must be an integer."""
