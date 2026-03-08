@@ -5,35 +5,11 @@ from __future__ import annotations
 import threading
 from collections import deque
 from dataclasses import dataclass, field
-from enum import Enum, auto
-from time import monotonic, time
-from typing import Protocol
+from time import time
 
 from agentlet.core.types import get_logger
 
 logger = get_logger("agentlet.metrics")
-
-
-class MetricType(Enum):
-    """Types of metrics supported."""
-    COUNTER = auto()
-    GAUGE = auto()
-    HISTOGRAM = auto()
-
-
-@dataclass(frozen=True, slots=True)
-class MetricValue:
-    """A single metric observation."""
-    name: str
-    value: float
-    labels: dict[str, str] = field(default_factory=dict)
-    timestamp: float = field(default_factory=time)
-
-
-class MetricsExporter(Protocol):
-    """Protocol for exporting metrics to external systems."""
-    def export(self, metrics: list[MetricValue]) -> None:
-        """Export a batch of metrics."""
 
 
 @dataclass
