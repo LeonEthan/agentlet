@@ -12,21 +12,15 @@ logger = get_logger("agentlet.middleware")
 
 
 class RequestHandler(Protocol):
-    """Handler for intercepting and optionally transforming requests."""
-    def __call__(self, request: ModelRequest) -> ModelRequest:
-        """Process request and return potentially modified request."""
+    def __call__(self, request: ModelRequest) -> ModelRequest: ...
 
 
 class ResponseHandler(Protocol):
-    """Handler for intercepting and optionally transforming responses."""
-    def __call__(self, request: ModelRequest, response: ModelResponse) -> ModelResponse:
-        """Process response and return potentially modified response."""
+    def __call__(self, request: ModelRequest, response: ModelResponse) -> ModelResponse: ...
 
 
 class ErrorHandler(Protocol):
-    """Handler for intercepting errors during LLM calls."""
-    def __call__(self, request: ModelRequest, error: Exception) -> None:
-        """Process error. Can re-raise to propagate or swallow to handle."""
+    def __call__(self, request: ModelRequest, error: Exception) -> None: ...
 
 
 @dataclass
@@ -64,7 +58,6 @@ class MiddlewareChain:
 
 
 def logging_request_handler(log_body: bool = False) -> RequestHandler:
-    """Create a request handler that logs requests."""
     def handler(request: ModelRequest) -> ModelRequest:
         context = {"message_count": len(request.messages), "tool_count": len(request.tools)}
         if log_body:
@@ -76,7 +69,6 @@ def logging_request_handler(log_body: bool = False) -> RequestHandler:
 
 
 def logging_response_handler(log_body: bool = False) -> ResponseHandler:
-    """Create a response handler that logs responses."""
     def handler(request: ModelRequest, response: ModelResponse) -> ModelResponse:
         context = {"finish_reason": response.finish_reason, "has_tool_calls": len(response.message.tool_calls) > 0}
         if response.usage:
@@ -89,7 +81,6 @@ def logging_response_handler(log_body: bool = False) -> ResponseHandler:
 
 
 def timing_middleware() -> tuple[RequestHandler, ResponseHandler]:
-    """Create request/response handlers that time LLM calls."""
     _timer_store: dict[int, Timer] = {}
 
     def request_handler(request: ModelRequest) -> ModelRequest:
@@ -109,7 +100,6 @@ def timing_middleware() -> tuple[RequestHandler, ResponseHandler]:
 
 
 def header_injection_middleware(headers: dict[str, str]) -> RequestHandler:
-    """Create a request handler that injects custom headers/metadata."""
     def handler(request: ModelRequest) -> ModelRequest:
         from dataclasses import replace
         new_metadata = dict(request.metadata)
