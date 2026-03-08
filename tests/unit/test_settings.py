@@ -355,3 +355,55 @@ class TestDefaultsTypeValidation:
 
         settings = SettingsLoader.load(config_file)
         assert settings.defaults["bash_timeout_seconds"] == 120.5
+
+    def test_max_iterations_rejects_zero(self, tmp_path: Path) -> None:
+        """max_iterations must be greater than 0."""
+        config_file = tmp_path / "settings.json"
+        config_file.write_text(json.dumps({
+            "defaults": {"max_iterations": 0},
+        }))
+
+        with pytest.raises(ValueError) as exc_info:
+            SettingsLoader.load(config_file)
+
+        assert "max_iterations" in str(exc_info.value)
+        assert "must be greater than 0" in str(exc_info.value)
+
+    def test_max_iterations_rejects_negative(self, tmp_path: Path) -> None:
+        """max_iterations must not be negative."""
+        config_file = tmp_path / "settings.json"
+        config_file.write_text(json.dumps({
+            "defaults": {"max_iterations": -5},
+        }))
+
+        with pytest.raises(ValueError) as exc_info:
+            SettingsLoader.load(config_file)
+
+        assert "max_iterations" in str(exc_info.value)
+        assert "must be greater than 0" in str(exc_info.value)
+
+    def test_bash_timeout_rejects_zero(self, tmp_path: Path) -> None:
+        """bash_timeout_seconds must be greater than 0."""
+        config_file = tmp_path / "settings.json"
+        config_file.write_text(json.dumps({
+            "defaults": {"bash_timeout_seconds": 0},
+        }))
+
+        with pytest.raises(ValueError) as exc_info:
+            SettingsLoader.load(config_file)
+
+        assert "bash_timeout_seconds" in str(exc_info.value)
+        assert "must be greater than 0" in str(exc_info.value)
+
+    def test_bash_timeout_rejects_negative(self, tmp_path: Path) -> None:
+        """bash_timeout_seconds must not be negative."""
+        config_file = tmp_path / "settings.json"
+        config_file.write_text(json.dumps({
+            "defaults": {"bash_timeout_seconds": -1},
+        }))
+
+        with pytest.raises(ValueError) as exc_info:
+            SettingsLoader.load(config_file)
+
+        assert "bash_timeout_seconds" in str(exc_info.value)
+        assert "must be greater than 0" in str(exc_info.value)

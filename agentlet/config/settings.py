@@ -144,6 +144,25 @@ class SettingsLoader:
                         f"Setting '{key}' in settings file {path} "
                         f"must be a number, got {type(value).__name__}"
                     )
+        cls._validate_defaults_ranges(defaults, path)
+
+    @classmethod
+    def _validate_defaults_ranges(cls, defaults: dict, path: Path) -> None:
+        """Validate that numeric defaults have valid ranges."""
+        if "max_iterations" in defaults:
+            value = defaults["max_iterations"]
+            if value <= 0:
+                raise ValueError(
+                    f"Setting 'max_iterations' in settings file {path} "
+                    f"must be greater than 0, got {value}"
+                )
+        if "bash_timeout_seconds" in defaults:
+            value = defaults["bash_timeout_seconds"]
+            if value <= 0:
+                raise ValueError(
+                    f"Setting 'bash_timeout_seconds' in settings file {path} "
+                    f"must be greater than 0, got {value}"
+                )
 
 
 def load_settings(path: Path | None = None) -> UserSettings:
