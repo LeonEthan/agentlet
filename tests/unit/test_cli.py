@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+import json
+import os
 from io import StringIO
+from pathlib import Path
+
+import pytest
 
 from agentlet.core.approvals import ApprovalPolicy
 from agentlet.core.interrupts import (
@@ -317,3 +322,219 @@ def test_cli_main_runs_full_question_resume_session_with_options_and_free_text(
         '  "kind": "question",\n'
         '  "request_id": "question_1"\n}'
     )
+
+
+class TestCliSettingsIntegration:
+    """Tests for CLI integration with settings.json configuration."""
+
+    def test_cli_main_reports_configuration_error_on_invalid_settings(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """CLI reports configuration error when settings file is invalid."""
+        # Create invalid settings file
+        agentlet_dir = tmp_path / ".agentlet"
+        agentlet_dir.mkdir()
+        settings_file = agentlet_dir / "settings.json"
+        settings_file.write_text("not valid json")
+
+        # Mock the settings path
+        monkeypatch.setattr(
+            "agentlet.config.settings.SettingsLoader.SETTINGS_PATH",
+            settings_file,
+        )
+
+        # Configuration errors are written to sys.stderr (before resolved_stderr is set up)
+        captured_stderr = StringIO()
+        monkeypatch.setattr("sys.stderr", captured_stderr)
+
+        exit_code = main(
+            ["task"],
+            stdin=StringIO(),
+            stdout=StringIO(),
+            stderr=StringIO(),  # This won't capture config errors
+            app_factory=lambda args, user_io: FakeRuntimeApp(
+                CompletedTurn(message=Message(role="assistant", content="Done."))
+            ),
+        )
+
+        assert exit_code == 2
+        assert "Configuration error" in captured_stderr.getvalue()
+        assert "Invalid JSON" in captured_stderr.getvalue()
+
+    def test_cli_main_applies_settings_defaults_to_parser(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """CLI uses defaults from settings file for argument parser."""
+        # Create workspace in tmp_path
+        workspace = tmp_path / "my_workspace"
+        workspace.mkdir()
+        state_dir = tmp_path / "custom_state"
+
+        # Create settings file
+        agentlet_home = tmp_path / "agentlet_home"
+        agentlet_home.mkdir()
+        settings_file = agentlet_home / "settings.json"
+        settings_file.write_text(json.dumps({
+            "defaults": {
+                "workspace_root": str(workspace),
+                "state_dir": str(state_dir),
+            },
+        }))
+
+        # Mock the settings path
+        monkeypatch.setattr(
+            "agentlet.config.settings.SettingsLoader.SETTINGS_PATH",
+            settings_file,
+        )
+
+        received_args = {}
+
+        def capture_app_factory(args, user_io):
+            received_args["workspace_root"] = args.workspace_root
+            received_args["state_dir"] = args.state_dir
+            return FakeRuntimeApp(
+                CompletedTurn(message=Message(role="assistant", content="Done."))
+            )
+
+        stdout = StringIO()
+        exit_code = main(
+            ["task"],
+            stdin=StringIO(),
+            stdout=stdout,
+            stderr=StringIO(),
+            app_factory=capture_app_factory,
+        )
+
+        assert exit_code == 0
+        assert received_args["workspace_root"] == str(workspace)
+        assert received_args["state_dir"] == str(state_dir)
+
+    def test_cli_main_cli_args_override_settings_defaults(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """CLI arguments take precedence over settings defaults."""
+        # Create workspaces
+        settings_workspace = tmp_path / "settings_workspace"
+        settings_workspace.mkdir()
+        cli_workspace = tmp_path / "cli_workspace"
+        cli_workspace.mkdir()
+
+        # Create settings file
+        agentlet_home = tmp_path / "agentlet_home"
+        agentlet_home.mkdir()
+        settings_file = agentlet_home / "settings.json"
+        settings_file.write_text(json.dumps({
+            "defaults": {
+                "workspace_root": str(settings_workspace),
+            },
+        }))
+
+        # Mock the settings path
+        monkeypatch.setattr(
+            "agentlet.config.settings.SettingsLoader.SETTINGS_PATH",
+            settings_file,
+        )
+
+        received_args = {}
+
+        def capture_app_factory(args, user_io):
+            received_args["workspace_root"] = args.workspace_root
+            return FakeRuntimeApp(
+                CompletedTurn(message=Message(role="assistant", content="Done."))
+            )
+
+        exit_code = main(
+            ["--workspace-root", str(cli_workspace), "task"],
+            stdin=StringIO(),
+            stdout=StringIO(),
+            stderr=StringIO(),
+            app_factory=capture_app_factory,
+        )
+
+        assert exit_code == 0
+        # CLI argument should override settings default
+        assert received_args["workspace_root"] == str(cli_workspace)
+
+    def test_cli_main_applies_env_from_settings(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """CLI applies environment variables from settings file."""
+        test_var = "AGENTLET_TEST_SETTINGS_ENV_12345"
+
+        # Clear the variable first
+        monkeypatch.delenv(test_var, raising=False)
+
+        # Create settings file with env variable
+        agentlet_home = tmp_path / "agentlet_home"
+        agentlet_home.mkdir()
+        settings_file = agentlet_home / "settings.json"
+        settings_file.write_text(json.dumps({
+            "env": {test_var: "from_settings"},
+        }))
+
+        # Mock the settings path
+        monkeypatch.setattr(
+            "agentlet.config.settings.SettingsLoader.SETTINGS_PATH",
+            settings_file,
+        )
+
+        # Run CLI
+        main(
+            ["task"],
+            stdin=StringIO(),
+            stdout=StringIO(),
+            stderr=StringIO(),
+            app_factory=lambda args, user_io: FakeRuntimeApp(
+                CompletedTurn(message=Message(role="assistant", content="Done."))
+            ),
+        )
+
+        # Verify env var was set from settings
+        assert os.environ.get(test_var) == "from_settings"
+
+    def test_cli_main_preserves_existing_env_over_settings(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Existing environment variables take precedence over settings."""
+        test_var = "AGENTLET_TEST_SETTINGS_ENV_12345"
+
+        # Set the variable before CLI runs
+        monkeypatch.setenv(test_var, "existing_value")
+
+        # Create settings file with different value
+        agentlet_home = tmp_path / "agentlet_home"
+        agentlet_home.mkdir()
+        settings_file = agentlet_home / "settings.json"
+        settings_file.write_text(json.dumps({
+            "env": {test_var: "from_settings"},
+        }))
+
+        # Mock the settings path
+        monkeypatch.setattr(
+            "agentlet.config.settings.SettingsLoader.SETTINGS_PATH",
+            settings_file,
+        )
+
+        # Run CLI
+        main(
+            ["task"],
+            stdin=StringIO(),
+            stdout=StringIO(),
+            stderr=StringIO(),
+            app_factory=lambda args, user_io: FakeRuntimeApp(
+                CompletedTurn(message=Message(role="assistant", content="Done."))
+            ),
+        )
+
+        # Existing value should be preserved
+        assert os.environ.get(test_var) == "existing_value"

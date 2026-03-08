@@ -5,8 +5,10 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from typing import Protocol, Sequence, TextIO
+from pathlib import Path
+from typing import Any, Protocol, Sequence, TextIO
 
+from agentlet.config import SettingsLoader, apply_env_from_settings, load_settings
 from agentlet.core.interrupts import (
     ApprovalRequest,
     ApprovalResponse,
@@ -139,7 +141,17 @@ def main(
 ) -> int:
     """Run the terminal app with runtime-owned orchestration and approvals."""
 
-    parser = _build_parser()
+    # 1. Load user settings and apply environment variables
+    try:
+        settings = load_settings()
+        apply_env_from_settings(settings)
+    except ValueError as exc:
+        sys.stderr.write(f"Configuration error: {exc}\n")
+        sys.stderr.flush()
+        return 2
+
+    # 2. Build parser with settings defaults
+    parser = _build_parser(defaults=settings.defaults)
     args = parser.parse_args(list(argv) if argv is not None else None)
     resolved_stdin = stdin or sys.stdin
     resolved_stdout = stdout or sys.stdout
@@ -175,29 +187,35 @@ def main(
     return _render_outcome(outcome, stdout=resolved_stdout)
 
 
-def _build_parser() -> argparse.ArgumentParser:
+def _build_parser(defaults: dict[str, Any] | None = None) -> argparse.ArgumentParser:
+    """Build argument parser with optional defaults from settings file."""
+    defaults = defaults or {}
+
     parser = argparse.ArgumentParser(prog="agentlet")
     parser.add_argument("task", nargs="?", help="Task to hand to the agent.")
     parser.add_argument(
         "--workspace-root",
-        default=".",
+        default=defaults.get("workspace_root", "."),
         help="Workspace directory exposed to the built-in coding tools.",
     )
     parser.add_argument(
         "--state-dir",
-        default=".agentlet",
+        default=defaults.get("state_dir", ".agentlet"),
         help="Directory used for session and memory files when explicit paths are omitted.",
     )
     parser.add_argument(
         "--session-path",
+        default=defaults.get("session_path"),
         help="JSONL session history path. Defaults under the state directory.",
     )
     parser.add_argument(
         "--memory-path",
+        default=defaults.get("memory_path"),
         help="Markdown durable memory path. Defaults under the state directory.",
     )
     parser.add_argument(
         "--instructions-path",
+        default=defaults.get("instructions_path"),
         help="Instructions file path. Defaults to AGENTS.md in the workspace when present.",
     )
     return parser

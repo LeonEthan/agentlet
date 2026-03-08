@@ -26,6 +26,8 @@ export AGENTLET_API_KEY="..."
 export AGENTLET_BASE_URL="https://api.openai.com/v1"
 ```
 
+Or use the settings file at `~/.agentlet/settings.json` (see Configuration section below).
+
 Run the CLI against the current workspace:
 
 ```bash
@@ -41,6 +43,47 @@ Run the test suite:
 ```bash
 uv run pytest
 ```
+
+## Configuration
+
+`agentlet` supports a settings file at `~/.agentlet/settings.json` for persistent configuration:
+
+```json
+{
+  "env": {
+    "AGENTLET_MODEL": "gpt-4.1-mini",
+    "AGENTLET_API_KEY": "sk-...",
+    "AGENTLET_BASE_URL": "https://api.openai.com/v1"
+  },
+  "defaults": {
+    "max_iterations": 8,
+    "bash_timeout_seconds": 120
+  }
+}
+```
+
+### Configuration Priority (high to low)
+
+1. **CLI arguments** (e.g., `--workspace-root`, `--max-iterations`)
+2. **Environment variables** (system env vars take precedence over settings file)
+3. **Settings file** (`~/.agentlet/settings.json`)
+4. **Built-in defaults**
+
+### Settings Reference
+
+**`env` section:**
+- `AGENTLET_MODEL` - Model name to use
+- `AGENTLET_API_KEY` - API key for the model provider
+- `AGENTLET_BASE_URL` - Optional base URL for OpenAI-compatible providers
+
+**`defaults` section:**
+- `workspace_root` - Default workspace directory
+- `state_dir` - Directory for session/memory files
+- `session_path` - Path to JSONL session file
+- `memory_path` - Path to markdown memory file
+- `instructions_path` - Path to custom instructions file
+- `max_iterations` - Maximum tool call iterations per turn
+- `bash_timeout_seconds` - Default timeout for Bash tool execution
 
 ## Runtime Files
 
