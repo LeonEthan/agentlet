@@ -318,6 +318,7 @@ def build_default_runtime_app(
     context_builder: ContextBuilder | None = None,
     tool_choice: ToolChoice | None = None,
     max_iterations: int = 8,
+    bash_timeout_seconds: float | None = None,
     environ: Mapping[str, str] | None = None,
 ) -> RuntimeApp:
     """Assemble the default terminal runtime from environment-backed settings."""
@@ -334,6 +335,7 @@ def build_default_runtime_app(
         context_builder=context_builder,
         tool_choice=tool_choice,
         max_iterations=max_iterations,
+        bash_timeout_seconds=bash_timeout_seconds,
     )
 
 

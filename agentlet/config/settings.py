@@ -89,6 +89,17 @@ class SettingsLoader:
             if key not in os.environ:
                 os.environ[key] = value
 
+    # Type expectations for defaults values
+    _DEFAULTS_PATH_KEYS = {
+        "workspace_root",
+        "state_dir",
+        "session_path",
+        "memory_path",
+        "instructions_path",
+    }
+    _DEFAULTS_INT_KEYS = {"max_iterations"}
+    _DEFAULTS_NUMBER_KEYS = {"bash_timeout_seconds"}
+
     @classmethod
     def _validate_settings(cls, data: dict, path: Path) -> None:
         """Validate settings structure."""
@@ -109,6 +120,30 @@ class SettingsLoader:
                     f"{', '.join(sorted(invalid_default_keys))}. "
                     f"Allowed keys: {', '.join(sorted(cls._ALLOWED_DEFAULT_KEYS))}"
                 )
+            cls._validate_defaults_types(defaults, path)
+
+    @classmethod
+    def _validate_defaults_types(cls, defaults: dict, path: Path) -> None:
+        """Validate that defaults values have correct types."""
+        for key, value in defaults.items():
+            if key in cls._DEFAULTS_PATH_KEYS:
+                if not isinstance(value, str):
+                    raise ValueError(
+                        f"Setting '{key}' in settings file {path} "
+                        f"must be a string, got {type(value).__name__}"
+                    )
+            elif key in cls._DEFAULTS_INT_KEYS:
+                if not isinstance(value, int) or isinstance(value, bool):
+                    raise ValueError(
+                        f"Setting '{key}' in settings file {path} "
+                        f"must be an integer, got {type(value).__name__}"
+                    )
+            elif key in cls._DEFAULTS_NUMBER_KEYS:
+                if not isinstance(value, (int, float)) or isinstance(value, bool):
+                    raise ValueError(
+                        f"Setting '{key}' in settings file {path} "
+                        f"must be a number, got {type(value).__name__}"
+                    )
 
 
 def load_settings(path: Path | None = None) -> UserSettings:

@@ -277,3 +277,81 @@ class TestAllAllowedDefaultKeys:
         # Should not raise
         settings = SettingsLoader.load(config_file)
         assert settings.defaults == all_defaults
+
+
+class TestDefaultsTypeValidation:
+    """Tests for defaults value type validation."""
+
+    def test_path_setting_rejects_non_string(self, tmp_path: Path) -> None:
+        """Path settings must be strings."""
+        config_file = tmp_path / "settings.json"
+        config_file.write_text(json.dumps({
+            "defaults": {"workspace_root": False},
+            "env": {"AGENTLET_MODEL": "m", "AGENTLET_API_KEY": "k"},
+        }))
+
+        with pytest.raises(ValueError) as exc_info:
+            SettingsLoader.load(config_file)
+
+        assert "workspace_root" in str(exc_info.value)
+        assert "must be a string" in str(exc_info.value)
+        assert "bool" in str(exc_info.value)
+
+    def test_max_iterations_rejects_non_int(self, tmp_path: Path) -> None:
+        """max_iterations must be an integer."""
+        config_file = tmp_path / "settings.json"
+        config_file.write_text(json.dumps({
+            "defaults": {"max_iterations": "10"},
+        }))
+
+        with pytest.raises(ValueError) as exc_info:
+            SettingsLoader.load(config_file)
+
+        assert "max_iterations" in str(exc_info.value)
+        assert "must be an integer" in str(exc_info.value)
+
+    def test_max_iterations_rejects_bool(self, tmp_path: Path) -> None:
+        """max_iterations must not be a boolean."""
+        config_file = tmp_path / "settings.json"
+        config_file.write_text(json.dumps({
+            "defaults": {"max_iterations": True},
+        }))
+
+        with pytest.raises(ValueError) as exc_info:
+            SettingsLoader.load(config_file)
+
+        assert "max_iterations" in str(exc_info.value)
+        assert "must be an integer" in str(exc_info.value)
+
+    def test_bash_timeout_rejects_non_number(self, tmp_path: Path) -> None:
+        """bash_timeout_seconds must be a number."""
+        config_file = tmp_path / "settings.json"
+        config_file.write_text(json.dumps({
+            "defaults": {"bash_timeout_seconds": "120"},
+        }))
+
+        with pytest.raises(ValueError) as exc_info:
+            SettingsLoader.load(config_file)
+
+        assert "bash_timeout_seconds" in str(exc_info.value)
+        assert "must be a number" in str(exc_info.value)
+
+    def test_bash_timeout_accepts_int(self, tmp_path: Path) -> None:
+        """bash_timeout_seconds accepts integer values."""
+        config_file = tmp_path / "settings.json"
+        config_file.write_text(json.dumps({
+            "defaults": {"bash_timeout_seconds": 120},
+        }))
+
+        settings = SettingsLoader.load(config_file)
+        assert settings.defaults["bash_timeout_seconds"] == 120
+
+    def test_bash_timeout_accepts_float(self, tmp_path: Path) -> None:
+        """bash_timeout_seconds accepts float values."""
+        config_file = tmp_path / "settings.json"
+        config_file.write_text(json.dumps({
+            "defaults": {"bash_timeout_seconds": 120.5},
+        }))
+
+        settings = SettingsLoader.load(config_file)
+        assert settings.defaults["bash_timeout_seconds"] == 120.5

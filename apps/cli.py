@@ -217,6 +217,18 @@ def _build_parser(defaults: dict[str, Any] | None = None) -> argparse.ArgumentPa
         default=defaults.get("instructions_path"),
         help="Instructions file path. Defaults to AGENTS.md in the workspace when present.",
     )
+    parser.add_argument(
+        "--max-iterations",
+        type=int,
+        default=defaults.get("max_iterations"),
+        help="Maximum tool call iterations per turn.",
+    )
+    parser.add_argument(
+        "--bash-timeout-seconds",
+        type=float,
+        default=defaults.get("bash_timeout_seconds"),
+        help="Default timeout for Bash tool execution.",
+    )
     return parser
 
 
@@ -224,6 +236,11 @@ def _build_runtime_app_from_args(
     args: argparse.Namespace,
     user_io: TerminalUserIO,
 ) -> RuntimeApp:
+    kwargs: dict[str, Any] = {}
+    if args.max_iterations is not None:
+        kwargs["max_iterations"] = args.max_iterations
+    if args.bash_timeout_seconds is not None:
+        kwargs["bash_timeout_seconds"] = args.bash_timeout_seconds
     return build_default_runtime_app(
         user_io=user_io,
         workspace_root=args.workspace_root,
@@ -231,6 +248,7 @@ def _build_runtime_app_from_args(
         session_path=args.session_path,
         memory_path=args.memory_path,
         instructions_path=args.instructions_path,
+        **kwargs,
     )
 
 
