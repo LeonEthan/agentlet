@@ -12,7 +12,11 @@ license = { file = "LICENSE" }
 authors = [
   { name = "agentlet contributors" },
 ]
-dependencies = []
+dependencies = [
+    "rich>=13.0.0",
+    "prompt-toolkit>=3.0.0",
+    "pygments>=2.15.0",
+]
 
 [project.scripts]
 agentlet = "apps.cli:main"
