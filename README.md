@@ -1,55 +1,87 @@
 # agentlet
 
-`agentlet` is a small Python agent framework for coding and research workflows.
+<p align="center">
+  <strong>A small Python agent framework for coding and research workflows.</strong>
+</p>
 
-The current repository includes:
+<p align="center">
+  <a href="https://github.com/yourusername/agentlet/actions"><img src="https://img.shields.io/badge/tests-passing-brightgreen" alt="Tests"></a>
+  <a href="https://pypi.org/project/agentlet"><img src="https://img.shields.io/pypi/v/agentlet.svg" alt="PyPI"></a>
+  <img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11+">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="License"></a>
+</p>
 
-- a thin core loop with centralized approvals,
-- a fixed built-in toolset for local coding and web lookup,
-- JSONL session persistence plus markdown durable memory,
-- a terminal runtime with end-to-end `AskUserQuestion` pause/resume support.
+---
+
+**agentlet** is a minimal, production-grade agent framework that brings structure to AI-powered coding workflows without the bloat.
+
+We built agentlet because we wanted a framework that stays out of the way—thin orchestration, explicit approvals, and durable state that you can inspect and version. No hidden side effects, no complex plugin systems, just a clean loop you can reason about.
+
+## Features
+
+1. **Thin Core Loop** — Centralized orchestration with clear execution flow; the loop owns state loading, tool validation, and persistence.
+
+2. **Built-in Toolset** — Carefully selected tools for coding and research:
+   - **Filesystem**: `Read`, `Write`, `Edit`, `Glob`, `Grep` with workspace sandboxing
+   - **Execution**: `Bash` with configurable timeouts and working directory control
+   - **Web**: `WebSearch`, `WebFetch` for real-time information
+   - **Interaction**: `AskUserQuestion` for structured clarifications
+
+3. **Approval-First Design** — Tools are categorized by risk (`read_only`, `mutating`, `exec`, `external_or_interrupt`). Default policy allows reads freely; everything else requires explicit approval.
+
+4. **Durable Session State** — Append-only JSONL session history plus markdown memory files. Your conversations are persisted transparently and can be resumed across sessions.
+
+5. **Structured Interrupts** — `AskUserQuestion` creates pausable, resumable workflows with replay protection. The runtime validates resumes against original requests to prevent double-execution.
+
+6. **Multi-Provider LLM Support** — Works with OpenAI, Anthropic, and any OpenAI-compatible API (local models, custom endpoints).
+
+7. **Zero Production Dependencies** — Core framework has no external dependencies. Only test utilities require pytest.
+
+---
 
 ## Quick Start
 
-Install the project and test dependencies:
+*Requires Python 3.11+*
 
 ```bash
-uv sync --dev
-```
+# Install with uv (or pip)
+uv pip install agentlet
 
-Set the model provider environment:
-
-```bash
-export AGENTLET_PROVIDER="openai"
+# Set your model credentials
 export AGENTLET_MODEL="gpt-4.1-mini"
-export AGENTLET_API_KEY="..."
-# Optional for OpenAI-compatible providers:
-export AGENTLET_BASE_URL="https://api.openai.com/v1"
-# Required for Anthropic providers:
-export AGENTLET_MAX_OUTPUT_TOKENS="1024"
+export AGENTLET_API_KEY="sk-..."
+
+# Run a task
+agentlet "Summarize the README files in this project"
 ```
 
-Or use the settings file at `~/.agentlet/settings.json` (see Configuration section below).
+### Using as a Library
 
-Run the CLI against the current workspace:
+```python
+import sys
+from agentlet.runtime.app import build_default_runtime_app
+from apps.cli import TerminalUserIO
 
-```bash
-uv run agentlet "Summarize docs/ARCHITECTURE.md" --workspace-root .
+# Assemble the runtime
+app = build_default_runtime_app(
+    user_io=TerminalUserIO(
+        stdin=sys.stdin,
+        stdout=sys.stdout,
+        stderr=sys.stderr,
+    ),
+    workspace_root=".",
+)
+
+# Run a turn
+outcome = app.run_turn(current_task="Find all Python files and count lines")
+print(outcome.message.content)
 ```
 
-`--workspace-root` defines the root for file-system tools and for resolving
-relative `Bash` working directories. It does not sandbox arbitrary shell
-commands.
-
-Run the test suite:
-
-```bash
-uv run pytest
-```
+---
 
 ## Configuration
 
-`agentlet` supports a settings file at `~/.agentlet/settings.json` for persistent configuration:
+agentlet can be configured via environment variables or a settings file at `~/.agentlet/settings.json`:
 
 ```json
 {
@@ -60,49 +92,141 @@ uv run pytest
     "AGENTLET_BASE_URL": "https://api.openai.com/v1"
   },
   "defaults": {
-    "provider": "openai",
     "max_iterations": 8,
     "bash_timeout_seconds": 120
   }
 }
 ```
 
-### Configuration Priority (high to low)
+**Environment variables:**
 
-1. **CLI arguments** (e.g., `--workspace-root`, `--max-iterations`)
-2. **Environment variables** (system env vars take precedence over settings file)
-3. **Settings file** (`~/.agentlet/settings.json`)
-4. **Built-in defaults**
+| Variable | Description |
+|----------|-------------|
+| `AGENTLET_PROVIDER` | `openai`, `anthropic`, or `openai_like` |
+| `AGENTLET_MODEL` | Model name (e.g., `gpt-4.1-mini`, `claude-3-opus`) |
+| `AGENTLET_API_KEY` | API key for the provider |
+| `AGENTLET_BASE_URL` | Optional base URL for OpenAI-compatible providers |
+| `AGENTLET_MAX_OUTPUT_TOKENS` | Required for Anthropic provider |
 
-### Settings Reference
+**Priority** (high to low): CLI arguments → Environment variables → Settings file → Built-in defaults
 
-**`env` section:**
-- `AGENTLET_PROVIDER` - Provider name: `openai`, `anthropic`, or `openai_like` (`openai-like` is also accepted by the CLI)
-- `AGENTLET_MODEL` - Model name to use
-- `AGENTLET_API_KEY` - API key for the model provider
-- `AGENTLET_BASE_URL` - Optional base URL for `openai_like`, or Anthropic API override
-- `AGENTLET_MAX_OUTPUT_TOKENS` - Required for `anthropic`
-- `AGENTLET_ANTHROPIC_VERSION` - Optional Anthropic API version override
-
-**`defaults` section:**
-- `provider` - Default CLI provider
-- `workspace_root` - Default workspace directory
-- `state_dir` - Directory for session/memory files
-- `session_path` - Path to JSONL session file
-- `memory_path` - Path to markdown memory file
-- `instructions_path` - Path to custom instructions file
-- `max_iterations` - Maximum tool call iterations per turn
-- `bash_timeout_seconds` - Default timeout for Bash tool execution
+---
 
 ## Runtime Files
 
-By default the runtime creates:
+By default, agentlet creates the following in your workspace:
 
-```text
+```
 .agentlet/
-├── memory.md
-└── session.jsonl
+├── session.jsonl   # Append-only conversation history
+└── memory.md       # Durable memory included in system context
+AGENTS.md           # Optional workspace-specific instructions
 ```
 
-`AGENTS.md` at the workspace root is loaded as additional system instructions
-when present.
+The session file is JSONL—human-readable, line-oriented, and perfect for version control.
+
+---
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                         Runtime App                         │
+├─────────────────────────────────────────────────────────────┤
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐  │
+│  │  AgentLoop   │  │ ToolRegistry │  │   ContextBuilder │  │
+│  │              │  │              │  │                  │  │
+│  │ • Orchestrate│  │ • Read/Write │  │ • Build messages │  │
+│  │ • Approve    │  │ • Bash       │  │ • Load memory    │  │
+│  │ • Persist    │  │ • WebSearch  │  │ • Resume state   │  │
+│  └──────────────┘  └──────────────┘  └──────────────────┘  │
+├─────────────────────────────────────────────────────────────┤
+│                      Model Clients                          │
+│         (OpenAI / Anthropic / OpenAI-Compatible)            │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Key Design Principles
+
+- **Explicit over implicit** — Control flow is direct; no hidden side effects
+- **Composition over inheritance** — Dataclasses and protocols, not framework magic
+- **File-backed state** — Session and memory are inspectable, portable files
+- **Minimal dependencies** — Modern Python standard library first
+
+---
+
+## Example: Custom Tool Registration
+
+```python
+from dataclasses import dataclass
+from agentlet.tools.base import Tool, ToolDefinition, ToolResult
+from agentlet.tools.registry import ToolRegistry
+
+@dataclass(frozen=True, slots=True)
+class CalculatorTool:
+    """A simple calculator tool."""
+
+    @property
+    def definition(self) -> ToolDefinition:
+        return ToolDefinition(
+            name="Calculator",
+            description="Perform basic arithmetic operations.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "a": {"type": "number"},
+                    "b": {"type": "number"},
+                    "op": {"type": "string", "enum": ["+", "-", "*", "/"]},
+                },
+                "required": ["a", "b", "op"],
+            },
+            approval_category="read_only",
+        )
+
+    def execute(self, arguments: dict) -> ToolResult:
+        a = arguments["a"]
+        b = arguments["b"]
+        op = arguments["op"]
+        result = {"+": a + b, "-": a - b, "*": a * b, "/": a / b}[op]
+        return ToolResult(output=str(result))
+
+# Build registry with custom tools
+registry = ToolRegistry([CalculatorTool(), ...])
+```
+
+---
+
+## Development
+
+```bash
+# Clone and install dependencies
+uv sync --dev
+
+# Run the test suite
+uv run pytest
+
+# Run a specific test
+uv run pytest tests/unit/test_agent_loop.py -v
+
+# Run the CLI in development mode
+uv run python -m apps.cli "Your task here" --workspace-root .
+```
+
+---
+
+## Why agentlet?
+
+Most agent frameworks optimize for demos. agentlet optimizes for:
+
+- **Long-running sessions** that survive restarts and can be resumed
+- **Auditable execution** with full session history in plain JSONL
+- **Safe automation** with approval policies that match your risk tolerance
+- **Minimal footprint** — no vector databases, no DAG engines, no callback hell
+
+If you're building agents that need to work reliably over hours or days, agentlet is designed for you.
+
+---
+
+## License
+
+agentlet is released under the MIT License. See [LICENSE](LICENSE) for details.
