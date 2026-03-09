@@ -34,7 +34,7 @@ Or use the settings file at `~/.agentlet/settings.json` (see Configuration secti
 Run the CLI against the current workspace:
 
 ```bash
-uv run python -m apps.cli "Summarize docs/ARCHITECTURE.md" --workspace-root .
+uv run agentlet "Summarize docs/ARCHITECTURE.md" --workspace-root .
 ```
 
 `--workspace-root` defines the root for file-system tools and for resolving
