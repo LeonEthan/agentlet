@@ -4,7 +4,8 @@ import argparse
 import asyncio
 import os
 import sys
-from pathlib import Path
+
+from dotenv import load_dotenv, find_dotenv
 
 from agentlet.agent.agent_loop import AgentLoop, AgentTurnResult
 from agentlet.agent.prompts.system_prompt import build_system_prompt
@@ -12,35 +13,15 @@ from agentlet.agent.providers.registry import ProviderConfig, ProviderRegistry
 from agentlet.agent.tools.registry import ToolRegistry
 
 
-def load_project_env(start: Path | None = None) -> None:
-    env_path = find_project_env(start or Path.cwd())
-    if env_path is None:
-        return
+def inject_project_env() -> None:
+    """Load .env file from current or parent directories into os.environ.
 
-    for line in env_path.read_text(encoding="utf-8").splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        if stripped.startswith("export "):
-            stripped = stripped[7:].strip()
-        if "=" not in stripped:
-            continue
-
-        key, raw_value = stripped.split("=", 1)
-        key = key.strip()
-        value = raw_value.strip()
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
-            value = value[1:-1]
-        os.environ.setdefault(key, value)
-
-
-def find_project_env(start: Path) -> Path | None:
-    current = start.resolve()
-    for directory in (current, *current.parents):
-        env_path = directory / ".env"
-        if env_path.is_file():
-            return env_path
-    return None
+    Uses load_dotenv() with override=False to avoid overwriting existing
+    environment variables.
+    """
+    env_path = find_dotenv(usecwd=True)
+    if env_path:
+        load_dotenv(env_path, override=False)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -112,7 +93,7 @@ async def run_chat(
 
 
 def main(argv: list[str] | None = None) -> int:
-    load_project_env()
+    inject_project_env()
     parser = build_parser()
     args = parser.parse_args(argv)
 

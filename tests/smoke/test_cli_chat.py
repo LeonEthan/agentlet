@@ -1,24 +1,36 @@
 from __future__ import annotations
 
-from agentlet.agent.providers.registry import LLMResponse
+from typing import Any
+
+from agentlet.agent.providers.registry import LLMResponse, ProviderConfig
 from agentlet.cli import main as cli_main
 
 
 class FakeProvider:
-    async def complete(self, messages, tools=None, model=None, temperature=None, max_tokens=None):
+    async def complete(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        model: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+    ) -> LLMResponse:
         return LLMResponse(content="cli ok", finish_reason="stop")
 
 
 class FakeProviderRegistry:
-    last_config = None
+    def __init__(self, capture_config: list[ProviderConfig] | None = None) -> None:
+        self._capture_config = capture_config
 
-    def create(self, config):
-        type(self).last_config = config
+    def create(self, config: ProviderConfig) -> FakeProvider:
+        if self._capture_config is not None:
+            self._capture_config.append(config)
         return FakeProvider()
 
 
 def test_main_chat_prints_response(monkeypatch, capsys) -> None:
-    monkeypatch.setattr(cli_main, "ProviderRegistry", FakeProviderRegistry)
+    captured_configs: list[ProviderConfig] = []
+    monkeypatch.setattr(cli_main, "ProviderRegistry", lambda: FakeProviderRegistry(captured_configs))
 
     exit_code = cli_main.main(["chat", "hello from cli"])
 
@@ -28,7 +40,8 @@ def test_main_chat_prints_response(monkeypatch, capsys) -> None:
 
 
 def test_main_chat_rejects_whitespace_only_message(monkeypatch, capsys) -> None:
-    monkeypatch.setattr(cli_main, "ProviderRegistry", FakeProviderRegistry)
+    captured_configs: list[ProviderConfig] = []
+    monkeypatch.setattr(cli_main, "ProviderRegistry", lambda: FakeProviderRegistry(captured_configs))
 
     try:
         cli_main.main(["chat", "   "])
@@ -42,7 +55,8 @@ def test_main_chat_rejects_whitespace_only_message(monkeypatch, capsys) -> None:
 
 
 def test_main_chat_loads_defaults_from_project_dotenv(tmp_path, monkeypatch, capsys) -> None:
-    monkeypatch.setattr(cli_main, "ProviderRegistry", FakeProviderRegistry)
+    captured_configs: list[ProviderConfig] = []
+    monkeypatch.setattr(cli_main, "ProviderRegistry", lambda: FakeProviderRegistry(captured_configs))
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
@@ -59,7 +73,8 @@ def test_main_chat_loads_defaults_from_project_dotenv(tmp_path, monkeypatch, cap
     captured = capsys.readouterr()
     assert exit_code == 0
     assert captured.out.strip() == "cli ok"
-    assert FakeProviderRegistry.last_config is not None
-    assert FakeProviderRegistry.last_config.api_key == "dotenv-key"
-    assert FakeProviderRegistry.last_config.api_base == "http://localhost:4000/v1"
-    assert FakeProviderRegistry.last_config.model == "dotenv-model"
+    assert len(captured_configs) == 1
+    config = captured_configs[0]
+    assert config.api_key == "dotenv-key"
+    assert config.api_base == "http://localhost:4000/v1"
+    assert config.model == "dotenv-model"
