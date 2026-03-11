@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""Provider-facing contracts and a minimal runtime registry."""
+
 from dataclasses import dataclass
 from typing import Callable, Protocol
 
@@ -9,6 +11,8 @@ from agentlet.agent.tools.registry import ToolSpec
 
 @dataclass(frozen=True)
 class TokenUsage:
+    """Normalized token accounting returned by a provider, when available."""
+
     prompt_tokens: int
     completion_tokens: int
     total_tokens: int
@@ -16,6 +20,8 @@ class TokenUsage:
 
 @dataclass(frozen=True)
 class LLMResponse:
+    """Provider output normalized into agentlet's internal shape."""
+
     content: str | None
     tool_calls: tuple[ToolCall, ...] = ()
     finish_reason: str | None = None
@@ -24,6 +30,8 @@ class LLMResponse:
 
 @dataclass(frozen=True)
 class ProviderConfig:
+    """Configuration shared by provider adapters."""
+
     name: str = "openai"
     model: str = "gpt-4o-mini"
     api_key: str | None = None
@@ -33,6 +41,8 @@ class ProviderConfig:
 
 
 class LLMProvider(Protocol):
+    """Narrow interface the orchestration loop depends on."""
+
     async def complete(
         self,
         messages: list[Message],
@@ -47,10 +57,19 @@ ProviderFactory = Callable[[ProviderConfig], LLMProvider]
 
 
 class ProviderRegistryError(RuntimeError):
+    """Raised when a configured provider name cannot be resolved."""
+
     pass
 
 
 class ProviderRegistry:
+    """Resolve provider names into concrete adapter instances.
+
+    The registry stays intentionally small in phase 1. A lazy default keeps the
+    common OpenAI-compatible path working without importing LiteLLM unless it is
+    actually needed.
+    """
+
     def __init__(self, factories: dict[str, ProviderFactory] | None = None) -> None:
         self._factories = dict(factories or {})
 
@@ -58,6 +77,8 @@ class ProviderRegistry:
         provider_name = config.name.lower()
 
         if not self._factories:
+            # Delay the import so simple unit tests that fake the provider do not
+            # require LiteLLM to be imported eagerly.
             from agentlet.agent.providers.litellm_provider import LiteLLMProvider
 
             self._factories["openai"] = LiteLLMProvider

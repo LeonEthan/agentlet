@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""LiteLLM-backed implementation of the provider contract."""
+
 import json
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -13,6 +15,8 @@ CompletionFunc = Callable[..., Awaitable[Any]]
 
 
 class LiteLLMProvider:
+    """Translate agentlet's provider contract to LiteLLM and back."""
+
     def __init__(
         self,
         config: ProviderConfig,
@@ -29,6 +33,12 @@ class LiteLLMProvider:
         temperature: float | None = None,
         max_tokens: int | None = None,
     ) -> LLMResponse:
+        """Execute one completion request through LiteLLM.
+
+        The request is assembled from normalized internal messages and optional
+        tool schemas so the rest of the codebase never needs to speak LiteLLM's
+        request dialect directly.
+        """
         request = {
             "model": model or self.config.model,
             "messages": [message.to_provider_dict() for message in messages],
@@ -54,6 +64,7 @@ class LiteLLMProvider:
         return self._normalize_response(response)
 
     def _load_completion_func(self) -> CompletionFunc:
+        """Import LiteLLM lazily so tests can inject a fake completion function."""
         try:
             from litellm import acompletion
         except ImportError as exc:
@@ -63,6 +74,7 @@ class LiteLLMProvider:
         return acompletion
 
     def _normalize_response(self, response: Any) -> LLMResponse:
+        """Collapse the raw SDK response into agentlet's stable internal types."""
         choice = self._read_first_choice(response)
         message = self._get_attr(choice, "message") or {}
         content = self._coerce_content(self._get_attr(message, "content"))
@@ -77,12 +89,14 @@ class LiteLLMProvider:
         )
 
     def _read_first_choice(self, response: Any) -> Any:
+        """Return the first completion choice or fail loudly on malformed output."""
         choices = self._get_attr(response, "choices") or []
         if not choices:
             raise RuntimeError("Provider response did not include any choices.")
         return choices[0]
 
     def _read_tool_calls(self, raw_tool_calls: list[Any]) -> list[ToolCall]:
+        """Normalize provider-specific tool call payloads into ToolCall objects."""
         tool_calls: list[ToolCall] = []
         for raw_call in raw_tool_calls:
             function = self._get_attr(raw_call, "function") or {}
@@ -98,6 +112,7 @@ class LiteLLMProvider:
         return tool_calls
 
     def _read_usage(self, raw_usage: Any) -> TokenUsage | None:
+        """Return usage only when all standard token counters are present."""
         if raw_usage is None:
             return None
 
@@ -114,11 +129,13 @@ class LiteLLMProvider:
         )
 
     def _coerce_content(self, content: Any) -> str | None:
+        """Preserve string content and JSON-encode structured content when needed."""
         if content is None or isinstance(content, str):
             return content
         return json.dumps(content, ensure_ascii=False)
 
     def _coerce_arguments_json(self, arguments: Any) -> str:
+        """Ensure tool arguments are stored as JSON text for a stable boundary."""
         if arguments is None:
             return "{}"
         if isinstance(arguments, str):
@@ -126,6 +143,7 @@ class LiteLLMProvider:
         return json.dumps(arguments, ensure_ascii=False)
 
     def _get_attr(self, value: Any, key: str) -> Any:
+        """Read both dict-style and attribute-style SDK objects transparently."""
         if isinstance(value, dict):
             return value.get(key)
         return getattr(value, key, None)

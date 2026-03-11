@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""CLI entrypoint for local agentlet experiments."""
+
 import argparse
 import asyncio
 import os
@@ -25,6 +27,7 @@ def inject_project_env() -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Build the small phase-1 CLI surface."""
     parser = argparse.ArgumentParser(prog="agentlet")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -73,6 +76,7 @@ async def run_chat(
     provider_registry: ProviderRegistry | None = None,
     tool_registry: ToolRegistry | None = None,
 ) -> AgentTurnResult:
+    """Wire CLI arguments into runtime dependencies and execute one turn."""
     registry = provider_registry or ProviderRegistry()
     provider = registry.create(
         ProviderConfig(
@@ -93,7 +97,10 @@ async def run_chat(
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Parse CLI input, run the requested command, and print the final output."""
     inject_project_env()
+    # Load .env before building parser defaults so environment-backed defaults
+    # are visible to argparse immediately.
     parser = build_parser()
     args = parser.parse_args(argv)
 
@@ -105,6 +112,8 @@ def main(argv: list[str] | None = None) -> int:
     if not message:
         parser.error("A message is required via argv or stdin.")
 
+    # asyncio.run keeps the CLI entrypoint synchronous while the runtime stays
+    # fully async-friendly internally.
     result = asyncio.run(
         run_chat(
             message=message,

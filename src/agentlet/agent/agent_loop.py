@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""Core orchestration loop for a single agent turn."""
+
 from dataclasses import dataclass
 
 from agentlet.agent.context import Context
@@ -10,6 +12,8 @@ from agentlet.agent.tools.registry import ToolRegistry
 
 @dataclass(frozen=True)
 class AgentTurnResult:
+    """Result returned after one complete user turn."""
+
     output: str
     context: Context
     iterations: int
@@ -17,10 +21,14 @@ class AgentTurnResult:
 
 
 class MaxIterationsExceeded(RuntimeError):
+    """Raised when the loop keeps requesting tools beyond the safety budget."""
+
     pass
 
 
 class AgentLoop:
+    """Coordinate context building, model calls, and optional tool execution."""
+
     def __init__(
         self,
         provider: LLMProvider,
@@ -42,10 +50,18 @@ class AgentLoop:
         *,
         context: Context | None = None,
     ) -> AgentTurnResult:
+        """Run one user turn until the model produces a final assistant answer.
+
+        If an existing context is supplied, we work on a shallow copy first and
+        only write the final history back once the turn completes successfully.
+        That keeps caller-owned state unchanged when the provider or a tool fails.
+        """
         if not user_input.strip():
             raise ValueError("user_input must not be empty.")
 
         base_context = context or Context(system_prompt=self.system_prompt)
+        # Copy the history so partial progress does not leak into the caller's
+        # context until the turn is known to be successful.
         active_context = Context(
             system_prompt=base_context.system_prompt,
             history=base_context.history,
@@ -61,6 +77,8 @@ class AgentLoop:
             )
 
             if not response.tool_calls:
+                # Commit the successful turn back into the caller-provided
+                # context only after all provider/tool work has completed.
                 if context is not None:
                     context.history[:] = active_context.history
                 return AgentTurnResult(
@@ -71,6 +89,8 @@ class AgentLoop:
                 )
 
             for call in response.tool_calls:
+                # Tool results become regular messages so the next model call can
+                # reason over them using the same message abstraction.
                 result = await self.tool_registry.execute(call)
                 active_context.add_tool_result(result)
 

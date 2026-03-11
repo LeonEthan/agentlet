@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+"""Pure in-memory message state for the agent runtime.
+
+This module intentionally stays free of provider SDK imports and tool execution
+logic. Its job is limited to holding normalized messages and building the next
+provider request from that state.
+"""
+
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -9,11 +16,14 @@ Role = Literal["system", "user", "assistant", "tool"]
 
 @dataclass(frozen=True)
 class ToolCall:
+    """Normalized representation of a provider-requested tool invocation."""
+
     id: str
     name: str
     arguments_json: str
 
     def to_provider_dict(self) -> dict[str, Any]:
+        """Convert the internal tool call into the provider-facing payload shape."""
         return {
             "id": self.id,
             "type": "function",
@@ -26,6 +36,8 @@ class ToolCall:
 
 @dataclass(frozen=True)
 class ToolResult:
+    """Tool execution output that can be appended as a follow-up message."""
+
     tool_call_id: str
     name: str
     content: str
@@ -33,6 +45,8 @@ class ToolResult:
 
 @dataclass(frozen=True)
 class Message:
+    """Single normalized chat message used across the runtime."""
+
     role: Role
     content: str | None
     name: str | None = None
@@ -40,6 +54,7 @@ class Message:
     tool_calls: tuple[ToolCall, ...] = field(default_factory=tuple)
 
     def to_provider_dict(self) -> dict[str, Any]:
+        """Serialize the message into the provider's OpenAI-like message schema."""
         payload: dict[str, Any] = {
             "role": self.role,
             "content": self.content,
@@ -54,11 +69,22 @@ class Message:
 
 
 class Context:
+    """Mutable conversation state used to assemble the next model request.
+
+    The context owns history mutation only. It does not decide when to call the
+    model, when to stop the loop, or how tools are executed.
+    """
+
     def __init__(self, system_prompt: str, history: list[Message] | None = None) -> None:
         self.system_prompt = system_prompt
         self.history = list(history or [])
 
     def build_messages(self, user_input: str | None = None) -> list[Message]:
+        """Return the full message list for the next provider call.
+
+        When a new user input is provided we append it to history first, so the
+        in-memory history remains the source of truth for subsequent turns.
+        """
         if user_input:
             self.history.append(Message(role="user", content=user_input))
         return [Message(role="system", content=self.system_prompt), *self.history]
@@ -68,6 +94,7 @@ class Context:
         content: str | None,
         tool_calls: list[ToolCall] | None = None,
     ) -> None:
+        """Record an assistant step, including requested tool calls if present."""
         self.history.append(
             Message(
                 role="assistant",
@@ -77,6 +104,7 @@ class Context:
         )
 
     def add_tool_result(self, result: ToolResult) -> None:
+        """Append the tool output in the standard tool-message format."""
         self.history.append(
             Message(
                 role="tool",
