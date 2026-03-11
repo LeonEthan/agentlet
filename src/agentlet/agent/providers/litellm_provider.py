@@ -90,7 +90,9 @@ class LiteLLMProvider:
                 ToolCall(
                     id=str(self._get_attr(raw_call, "id") or ""),
                     name=str(self._get_attr(function, "name") or ""),
-                    arguments_json=str(self._get_attr(function, "arguments") or "{}"),
+                    arguments_json=self._coerce_arguments_json(
+                        self._get_attr(function, "arguments")
+                    ),
                 )
             )
         return tool_calls
@@ -115,6 +117,13 @@ class LiteLLMProvider:
         if content is None or isinstance(content, str):
             return content
         return json.dumps(content, ensure_ascii=False)
+
+    def _coerce_arguments_json(self, arguments: Any) -> str:
+        if arguments is None:
+            return "{}"
+        if isinstance(arguments, str):
+            return arguments
+        return json.dumps(arguments, ensure_ascii=False)
 
     def _get_attr(self, value: Any, key: str) -> Any:
         if isinstance(value, dict):

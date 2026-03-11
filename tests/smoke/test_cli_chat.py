@@ -22,3 +22,17 @@ def test_main_chat_prints_response(monkeypatch, capsys) -> None:
     captured = capsys.readouterr()
     assert exit_code == 0
     assert captured.out.strip() == "cli ok"
+
+
+def test_main_chat_rejects_whitespace_only_message(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(cli_main, "ProviderRegistry", FakeProviderRegistry)
+
+    try:
+        cli_main.main(["chat", "   "])
+    except SystemExit as exc:
+        assert exc.code == 2
+    else:
+        raise AssertionError("Expected the CLI to exit with a parser error.")
+
+    captured = capsys.readouterr()
+    assert "A message is required via argv or stdin." in captured.err

@@ -108,3 +108,35 @@ def test_litellm_provider_normalizes_tool_calls_from_object_response() -> None:
     assert len(response.tool_calls) == 1
     assert response.tool_calls[0].name == "echo"
     assert response.tool_calls[0].arguments_json == '{"text":"hello"}'
+
+
+def test_litellm_provider_serializes_dict_tool_arguments_as_json() -> None:
+    async def fake_completion(**kwargs):
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "content": None,
+                        "tool_calls": [
+                            {
+                                "id": "call-1",
+                                "function": {
+                                    "name": "echo",
+                                    "arguments": {"text": "hello"},
+                                },
+                            }
+                        ],
+                    },
+                    "finish_reason": "tool_calls",
+                }
+            ]
+        }
+
+    provider = LiteLLMProvider(
+        ProviderConfig(model="gpt-4o-mini"),
+        completion_func=fake_completion,
+    )
+
+    response = asyncio.run(provider.complete([Message(role="user", content="hello")]))
+
+    assert response.tool_calls[0].arguments_json == '{"text": "hello"}'

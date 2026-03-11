@@ -86,7 +86,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.command != "chat":
         parser.error(f"Unsupported command: {args.command}")
 
-    message = args.message or sys.stdin.read().strip()
+    raw_message = args.message if args.message is not None else sys.stdin.read()
+    message = raw_message.strip()
     if not message:
         parser.error("A message is required via argv or stdin.")
 
