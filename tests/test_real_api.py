@@ -2,36 +2,49 @@
 
 This module tests the actual API calls with real credentials from .env file.
 Run these tests with: python -m pytest tests/test_real_api.py -v
+
+Note: This file relies on conftest.py for sys.path setup. Run with:
+    uv run python -m pytest tests/test_real_api.py -v
+
+Or with environment loaded:
+    export $(cat .env | xargs) && uv run python -m pytest tests/test_real_api.py -v
 """
 
 from __future__ import annotations
 
 import os
-import sys
 import asyncio
 import pytest
-from pathlib import Path
-
-# Load .env before any imports that might need it
-from dotenv import load_dotenv, find_dotenv
-
-env_path = find_dotenv(usecwd=True)
-if env_path:
-    load_dotenv(env_path, override=False)
-    print(f"\n✓ Loaded .env from: {env_path}")
-else:
-    print("\n⚠ No .env file found!")
-
-# Add src to path for imports
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root / "src"))
 
 from agentlet.agent.agent_loop import AgentLoop, AgentTurnResult
-from agentlet.agent.context import Context
+from agentlet.agent.context import Context, Message, ToolCall
 from agentlet.agent.providers.registry import ProviderConfig, ProviderRegistry
 from agentlet.agent.providers.litellm_provider import LiteLLMProvider
 from agentlet.agent.tools.registry import ToolRegistry, ToolSpec
 from agentlet.agent.prompts.system_prompt import build_system_prompt
+
+# Default provider name used across tests
+DEFAULT_PROVIDER = "openai"
+DEFAULT_MODEL_FALLBACK = "gpt-4o-mini"
+
+
+def _get_env_config(
+    temperature: float = 0.0,
+    max_tokens: int | None = None,
+    model: str | None = None,
+) -> ProviderConfig:
+    """Create a ProviderConfig from environment variables.
+
+    This helper reduces duplication across tests.
+    """
+    return ProviderConfig(
+        name=DEFAULT_PROVIDER,
+        model=model or os.getenv("AGENTLET_MODEL", DEFAULT_MODEL_FALLBACK),
+        api_key=os.getenv("OPENAI_API_KEY"),
+        api_base=os.getenv("OPENAI_BASE_URL"),
+        temperature=temperature,
+        max_tokens=max_tokens,
+    )
 
 
 class TestEnvLoading:
@@ -63,16 +76,9 @@ class TestProviderConfig:
 
     def test_provider_config_creation(self):
         """Test ProviderConfig dataclass with env vars."""
-        config = ProviderConfig(
-            name="openai",
-            model=os.getenv("AGENTLET_MODEL", "gpt-4o-mini"),
-            api_key=os.getenv("OPENAI_API_KEY"),
-            api_base=os.getenv("OPENAI_BASE_URL"),
-            temperature=0.7,
-            max_tokens=100,
-        )
+        config = _get_env_config(temperature=0.7, max_tokens=100)
 
-        assert config.name == "openai"
+        assert config.name == DEFAULT_PROVIDER
         assert config.api_key is not None
         assert config.api_base is not None
         assert config.temperature == 0.7
@@ -84,12 +90,7 @@ class TestProviderConfig:
 
     def test_registry_creates_litellm_provider(self):
         """Test ProviderRegistry creates LiteLLM provider."""
-        config = ProviderConfig(
-            name="openai",
-            model=os.getenv("AGENTLET_MODEL", "gpt-4o-mini"),
-            api_key=os.getenv("OPENAI_API_KEY"),
-            api_base=os.getenv("OPENAI_BASE_URL"),
-        )
+        config = _get_env_config()
 
         registry = ProviderRegistry()
         provider = registry.create(config)
@@ -105,21 +106,12 @@ class TestLiteLLMProvider:
     @pytest.fixture
     def provider(self):
         """Create a LiteLLM provider with real config."""
-        config = ProviderConfig(
-            name="openai",
-            model=os.getenv("AGENTLET_MODEL", "gpt-4o-mini"),
-            api_key=os.getenv("OPENAI_API_KEY"),
-            api_base=os.getenv("OPENAI_BASE_URL"),
-            temperature=0.0,
-            max_tokens=50,
-        )
+        config = _get_env_config(temperature=0.0, max_tokens=50)
         return LiteLLMProvider(config)
 
     @pytest.mark.asyncio
     async def test_simple_completion(self, provider):
         """Test a simple completion call."""
-        from agentlet.agent.context import Message
-
         messages = [
             Message(role="system", content="You are a helpful assistant."),
             Message(role="user", content="Say 'Hello from API test' and nothing else."),
@@ -140,8 +132,6 @@ class TestLiteLLMProvider:
     @pytest.mark.asyncio
     async def test_completion_with_tools(self, provider):
         """Test completion with tool definitions."""
-        from agentlet.agent.context import Message
-
         messages = [
             Message(role="system", content="You are a helpful assistant."),
             Message(role="user", content="What is the weather?"),
@@ -176,21 +166,12 @@ class TestLiteLLMProvider:
 
     @pytest.mark.asyncio
     async def test_completion_temperature_variations(self):
-        """Test completion with different temperature settings."""
-        from agentlet.agent.context import Message
-
+        """Test completion with different temperature settings concurrently."""
         temperatures = [0.0, 0.5, 1.0]
-        results = []
 
-        for temp in temperatures:
-            config = ProviderConfig(
-                name="openai",
-                model=os.getenv("AGENTLET_MODEL", "gpt-4o-mini"),
-                api_key=os.getenv("OPENAI_API_KEY"),
-                api_base=os.getenv("OPENAI_BASE_URL"),
-                temperature=temp,
-                max_tokens=20,
-            )
+        async def _test_temp(temp: float) -> tuple[float, str]:
+            """Make a completion call for a specific temperature."""
+            config = _get_env_config(temperature=temp, max_tokens=20)
             provider = LiteLLMProvider(config)
 
             messages = [
@@ -199,11 +180,13 @@ class TestLiteLLMProvider:
             ]
 
             response = await provider.complete(messages)
-            results.append((temp, response.content))
-            print(f"\n  Temperature {temp}: {response.content[:50]}...")
+            return (temp, response.content)
 
-        # All should return non-empty content
+        # Run all temperature tests concurrently for efficiency
+        results = await asyncio.gather(*[_test_temp(t) for t in temperatures])
+
         for temp, content in results:
+            print(f"\n  Temperature {temp}: {content[:50]}...")
             assert content is not None and len(content) > 0
 
 
@@ -213,14 +196,7 @@ class TestAgentLoop:
     @pytest.fixture
     def agent_loop(self):
         """Create an AgentLoop with real provider."""
-        config = ProviderConfig(
-            name="openai",
-            model=os.getenv("AGENTLET_MODEL", "gpt-4o-mini"),
-            api_key=os.getenv("OPENAI_API_KEY"),
-            api_base=os.getenv("OPENAI_BASE_URL"),
-            temperature=0.0,
-            max_tokens=100,
-        )
+        config = _get_env_config(temperature=0.0, max_tokens=100)
         registry = ProviderRegistry()
         provider = registry.create(config)
 
@@ -272,15 +248,7 @@ class TestAgentLoop:
     @pytest.mark.asyncio
     async def test_max_iterations_protection(self):
         """Test that max_iterations is enforced."""
-        # This would require a tool that keeps calling itself
-        # For now, just verify the config works
-        config = ProviderConfig(
-            name="openai",
-            model=os.getenv("AGENTLET_MODEL", "gpt-4o-mini"),
-            api_key=os.getenv("OPENAI_API_KEY"),
-            api_base=os.getenv("OPENAI_BASE_URL"),
-            temperature=0.0,
-        )
+        config = _get_env_config(temperature=0.0)
         provider = LiteLLMProvider(config)
 
         loop = AgentLoop(
@@ -300,7 +268,6 @@ class TestToolExecution:
     @pytest.fixture
     def echo_tool(self):
         """Create a simple echo tool for testing."""
-        from agentlet.agent.tools.registry import Tool
         from dataclasses import dataclass
 
         @dataclass
@@ -329,8 +296,6 @@ class TestToolExecution:
     @pytest.mark.asyncio
     async def test_tool_registry_execution(self, echo_tool):
         """Test tool registry can execute tools."""
-        from agentlet.agent.context import ToolCall
-
         registry = ToolRegistry()
         registry.register(echo_tool)
 
@@ -355,14 +320,13 @@ class TestErrorHandling:
     async def test_invalid_api_key(self):
         """Test behavior with invalid API key."""
         config = ProviderConfig(
-            name="openai",
-            model=os.getenv("AGENTLET_MODEL", "gpt-4o-mini"),
+            name=DEFAULT_PROVIDER,
+            model=os.getenv("AGENTLET_MODEL", DEFAULT_MODEL_FALLBACK),
             api_key="invalid-key-12345",
             api_base=os.getenv("OPENAI_BASE_URL"),
         )
         provider = LiteLLMProvider(config)
 
-        from agentlet.agent.context import Message
         messages = [
             Message(role="user", content="Hello"),
         ]
@@ -382,14 +346,7 @@ class TestSystemIntegration:
     async def test_end_to_end_single_turn(self):
         """Test a complete end-to-end single turn."""
         # Setup
-        config = ProviderConfig(
-            name="openai",
-            model=os.getenv("AGENTLET_MODEL", "gpt-4o-mini"),
-            api_key=os.getenv("OPENAI_API_KEY"),
-            api_base=os.getenv("OPENAI_BASE_URL"),
-            temperature=0.0,
-            max_tokens=50,
-        )
+        config = _get_env_config(temperature=0.0, max_tokens=50)
         registry = ProviderRegistry()
         provider = registry.create(config)
         tool_registry = ToolRegistry()
@@ -413,96 +370,3 @@ class TestSystemIntegration:
         print(f"\n  ✓ Output: {result.output}")
         print(f"  ✓ Iterations: {result.iterations}")
         print(f"  ✓ Context history: {len(result.context.history)} messages")
-
-
-def run_async_tests():
-    """Helper to run all async tests manually."""
-    print("\n" + "="*60)
-    print("Real API Integration Tests")
-    print("="*60)
-
-    # Check environment
-    print("\n1. Environment Check")
-    api_key = os.getenv("OPENAI_API_KEY")
-    base_url = os.getenv("OPENAI_BASE_URL")
-    model = os.getenv("AGENTLET_MODEL")
-
-    print(f"   OPENAI_API_KEY: {'✓ Set' if api_key else '✗ Missing'} ({len(api_key) if api_key else 0} chars)")
-    print(f"   OPENAI_BASE_URL: {'✓ Set' if base_url else '✗ Missing'} ({base_url})")
-    print(f"   AGENTLET_MODEL: {'✓ Set' if model else '✗ Missing'} ({model})")
-
-    if not all([api_key, base_url, model]):
-        print("\n❌ Missing required environment variables!")
-        return 1
-
-    # Run simple test
-    print("\n2. Simple API Call Test")
-    asyncio.run(_run_simple_test())
-
-    print("\n3. Agent Loop Test")
-    asyncio.run(_run_agent_test())
-
-    print("\n" + "="*60)
-    print("All tests completed!")
-    print("="*60)
-    return 0
-
-
-async def _run_simple_test():
-    """Run a simple API test."""
-    try:
-        config = ProviderConfig(
-            name="openai",
-            model=os.getenv("AGENTLET_MODEL"),
-            api_key=os.getenv("OPENAI_API_KEY"),
-            api_base=os.getenv("OPENAI_BASE_URL"),
-            temperature=0.0,
-            max_tokens=30,
-        )
-        provider = LiteLLMProvider(config)
-
-        from agentlet.agent.context import Message
-        messages = [
-            Message(role="system", content="You are helpful."),
-            Message(role="user", content="Say 'API test OK'"),
-        ]
-
-        response = await provider.complete(messages)
-        print(f"   ✓ Response: {response.content}")
-        print(f"   ✓ Finish reason: {response.finish_reason}")
-        if response.usage:
-            print(f"   ✓ Tokens: {response.usage.total_tokens}")
-    except Exception as e:
-        print(f"   ✗ Error: {e}")
-        raise
-
-
-async def _run_agent_test():
-    """Run agent loop test."""
-    try:
-        config = ProviderConfig(
-            name="openai",
-            model=os.getenv("AGENTLET_MODEL"),
-            api_key=os.getenv("OPENAI_API_KEY"),
-            api_base=os.getenv("OPENAI_BASE_URL"),
-            temperature=0.0,
-            max_tokens=50,
-        )
-        provider = LiteLLMProvider(config)
-        loop = AgentLoop(
-            provider=provider,
-            tool_registry=ToolRegistry(),
-            system_prompt=build_system_prompt(),
-        )
-
-        result = await loop.run_turn("Respond with exactly: 'Agent test OK'")
-        print(f"   ✓ Output: {result.output}")
-        print(f"   ✓ Iterations: {result.iterations}")
-    except Exception as e:
-        print(f"   ✗ Error: {e}")
-        raise
-
-
-if __name__ == "__main__":
-    # Can run directly for quick test
-    sys.exit(run_async_tests())

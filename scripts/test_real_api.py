@@ -14,34 +14,31 @@ import os
 import sys
 from pathlib import Path
 
-# Load .env
-try:
-    from dotenv import load_dotenv, find_dotenv
-    env_path = find_dotenv(usecwd=True)
-    if env_path:
-        load_dotenv(env_path, override=False)
-        print(f"✓ Loaded .env from: {env_path}")
-    else:
-        print("⚠ No .env file found!")
-except ImportError:
-    print("⚠ python-dotenv not installed, skipping .env load")
-
-# Add src to path
+# Add src to path for imports
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root / "src"))
 
+# Load .env using the shared utility from CLI
+from agentlet.cli.main import inject_project_env
+
+inject_project_env()
+
 from agentlet.agent.agent_loop import AgentLoop
+from agentlet.agent.context import Context, Message
 from agentlet.agent.providers.litellm_provider import LiteLLMProvider
 from agentlet.agent.providers.registry import ProviderConfig, ProviderRegistry
 from agentlet.agent.tools.registry import ToolRegistry
 from agentlet.agent.prompts.system_prompt import build_system_prompt
 
+# Default provider name used across tests
+DEFAULT_PROVIDER = "openai"
+
 
 def check_env():
     """Check environment variables."""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("Environment Check")
-    print("="*60)
+    print("=" * 60)
 
     api_key = os.getenv("OPENAI_API_KEY")
     base_url = os.getenv("OPENAI_BASE_URL")
@@ -76,24 +73,31 @@ def check_env():
     return True
 
 
+def _get_env_config(
+    temperature: float = 0.0,
+    max_tokens: int | None = None,
+) -> ProviderConfig:
+    """Create a ProviderConfig from environment variables."""
+    return ProviderConfig(
+        name=DEFAULT_PROVIDER,
+        model=os.getenv("AGENTLET_MODEL"),
+        api_key=os.getenv("OPENAI_API_KEY"),
+        api_base=os.getenv("OPENAI_BASE_URL"),
+        temperature=temperature,
+        max_tokens=max_tokens,
+    )
+
+
 async def test_provider():
     """Test LiteLLM provider directly."""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("Test 1: LiteLLM Provider Direct Call")
-    print("="*60)
+    print("=" * 60)
 
     try:
-        config = ProviderConfig(
-            name="openai",
-            model=os.getenv("AGENTLET_MODEL"),
-            api_key=os.getenv("OPENAI_API_KEY"),
-            api_base=os.getenv("OPENAI_BASE_URL"),
-            temperature=0.0,
-            max_tokens=30,
-        )
+        config = _get_env_config(temperature=0.0, max_tokens=30)
         provider = LiteLLMProvider(config)
 
-        from agentlet.agent.context import Message
         messages = [
             Message(role="system", content="You are helpful."),
             Message(role="user", content="Say 'Provider test OK' and nothing else."),
@@ -102,7 +106,7 @@ async def test_provider():
         print("Sending request...")
         response = await provider.complete(messages)
 
-        print(f"✓ Response received")
+        print("✓ Response received")
         print(f"  Content: {response.content}")
         print(f"  Finish reason: {response.finish_reason}")
         if response.usage:
@@ -121,19 +125,12 @@ async def test_provider():
 
 async def test_agent_loop():
     """Test AgentLoop."""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("Test 2: Agent Loop")
-    print("="*60)
+    print("=" * 60)
 
     try:
-        config = ProviderConfig(
-            name="openai",
-            model=os.getenv("AGENTLET_MODEL"),
-            api_key=os.getenv("OPENAI_API_KEY"),
-            api_base=os.getenv("OPENAI_BASE_URL"),
-            temperature=0.0,
-            max_tokens=50,
-        )
+        config = _get_env_config(temperature=0.0, max_tokens=50)
         registry = ProviderRegistry()
         provider = registry.create(config)
 
@@ -149,7 +146,7 @@ async def test_agent_loop():
             "Respond with exactly: 'Agent loop test OK'"
         )
 
-        print(f"✓ Response received")
+        print("✓ Response received")
         print(f"  Output: {result.output}")
         print(f"  Iterations: {result.iterations}")
         print(f"  Finish reason: {result.finish_reason}")
@@ -164,16 +161,16 @@ async def test_agent_loop():
 
 async def test_cli_simulation():
     """Simulate CLI chat."""
-    print("\n" + "="*60)
+    from agentlet.cli.main import run_chat
+
+    print("\n" + "=" * 60)
     print("Test 3: CLI Simulation")
-    print("="*60)
+    print("=" * 60)
 
     try:
-        from agentlet.cli.main import run_chat
-
         result = await run_chat(
             message="Say 'CLI simulation OK'",
-            provider_name="openai",
+            provider_name=DEFAULT_PROVIDER,
             model=os.getenv("AGENTLET_MODEL"),
             api_key=os.getenv("OPENAI_API_KEY"),
             api_base=os.getenv("OPENAI_BASE_URL"),
@@ -181,7 +178,7 @@ async def test_cli_simulation():
             max_tokens=30,
         )
 
-        print(f"✓ Response received")
+        print("✓ Response received")
         print(f"  Output: {result.output}")
         print(f"  Iterations: {result.iterations}")
 
@@ -195,21 +192,12 @@ async def test_cli_simulation():
 
 async def test_multi_turn():
     """Test multi-turn conversation with context."""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("Test 4: Multi-turn Conversation")
-    print("="*60)
+    print("=" * 60)
 
     try:
-        from agentlet.agent.context import Context
-
-        config = ProviderConfig(
-            name="openai",
-            model=os.getenv("AGENTLET_MODEL"),
-            api_key=os.getenv("OPENAI_API_KEY"),
-            api_base=os.getenv("OPENAI_BASE_URL"),
-            temperature=0.0,
-            max_tokens=50,
-        )
+        config = _get_env_config(temperature=0.0, max_tokens=50)
         provider = LiteLLMProvider(config)
 
         loop = AgentLoop(
@@ -252,31 +240,49 @@ async def test_multi_turn():
 
 async def main():
     """Run all tests."""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("Agentlet Real API Tests")
-    print("="*60)
+    print("=" * 60)
 
     # Check environment
     if not check_env():
         return 1
 
-    # Run tests
-    results = []
+    # Run tests concurrently for efficiency
+    results = await asyncio.gather(
+        test_provider(),
+        test_agent_loop(),
+        test_cli_simulation(),
+        test_multi_turn(),
+        return_exceptions=True
+    )
 
-    results.append(("Provider Direct Call", await test_provider()))
-    results.append(("Agent Loop", await test_agent_loop()))
-    results.append(("CLI Simulation", await test_cli_simulation()))
-    results.append(("Multi-turn Conversation", await test_multi_turn()))
+    # Handle results (convert exceptions to False)
+    test_names = [
+        "Provider Direct Call",
+        "Agent Loop",
+        "CLI Simulation",
+        "Multi-turn Conversation"
+    ]
+    processed_results = [
+        (name, False if isinstance(result, Exception) else result)
+        for name, result in zip(test_names, results)
+    ]
+
+    # Print any exceptions that occurred
+    for name, result in zip(test_names, results):
+        if isinstance(result, Exception):
+            print(f"\n✗ {name} raised an exception: {result}")
 
     # Summary
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("Test Summary")
-    print("="*60)
+    print("=" * 60)
 
-    passed = sum(1 for _, r in results if r)
-    total = len(results)
+    passed = sum(1 for _, r in processed_results if r)
+    total = len(processed_results)
 
-    for name, result in results:
+    for name, result in processed_results:
         status = "✓ PASS" if result else "✗ FAIL"
         print(f"  {status}: {name}")
 
