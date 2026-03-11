@@ -280,6 +280,11 @@ Deliberate constraints:
 - no large provider registry yet
 - no vendor-specific branching outside the adapter
 
+Operational note:
+
+- some OpenAI-compatible backends still require provider-prefixed model names when routed through `LiteLLM`
+- example: DeepSeek should be configured as `deepseek/deepseek-chat`, not just `deepseek-chat`
+
 Provider registry role in phase 1:
 
 - convert a short provider name such as `openai` into a provider instance
@@ -303,11 +308,24 @@ uv run python -m agentlet.cli.main chat --model gpt-4o-mini
 Behavior:
 
 - read a user message from argv or stdin
+- load `.env` from the current working directory or parent directories before parsing defaults
 - construct `Context`, provider, and tool registry
 - run one turn
 - print the final assistant response
 
 This is enough to validate the loop before adding a REPL or session persistence.
+
+Environment behavior:
+
+- `.env` values are treated as defaults for `OPENAI_API_KEY`, `OPENAI_BASE_URL`, and `AGENTLET_MODEL`
+- existing shell environment variables must win over `.env`
+- this keeps local real-provider testing simple without hardcoding secrets into commands
+
+Example local test:
+
+```bash
+uv run python -m agentlet.cli.main chat "Hello"
+```
 
 ## 10. Testing Strategy
 
@@ -327,6 +345,12 @@ The test plan should mirror the boundaries:
   - one end-to-end path with a fake provider
 
 Phase 1 should prefer fake providers in tests over live network calls.
+
+For manual validation outside automated tests:
+
+- use a project `.env` for credentials and endpoint configuration
+- verify at least one real text-only request against an OpenAI-compatible backend
+- keep automated test coverage fake-based to avoid network flakiness
 
 ## 11. Implementation Sequence
 
@@ -360,6 +384,7 @@ Current recommendation:
 Phase 1 is complete when all of the following are true:
 
 - one CLI command can run a single turn against an OpenAI-compatible endpoint
+- one CLI command can read project `.env` defaults for local real-provider testing
 - `AgentLoop`, `Context`, and provider adapter are separate modules
 - tool-call round trips work through the loop
 - the core modules have unit tests
