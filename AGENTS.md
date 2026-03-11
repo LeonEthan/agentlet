@@ -52,17 +52,21 @@ Target layout for this project:
 ├── pyproject.toml
 ├── src/
 │   └── agentlet/
-│       ├── domain/         # pure types, policies, state transitions
-│       ├── ports/          # abstract interfaces for model/tool/storage boundaries
-│       ├── services/       # orchestration and use-case logic
-│       ├── adapters/       # concrete implementations of ports
-│       ├── prompts/        # prompt assets and templates
-│       └── cli/            # entrypoints and wiring
+│       ├── agent/
+│       │   ├── agent_loop.py
+│       │   ├── context.py
+│       │   ├── tools/
+│       │   │   └── registry.py
+│       │   ├── providers/
+│       │   │   ├── registry.py
+│       │   │   └── litellm_provider.py
+│       │   └── prompts/
+│       │       └── system_prompt.py
+│       └── cli/
+│           └── main.py
 ├── tests/
 │   ├── unit/
-│   ├── integration/
 │   └── smoke/
-├── evals/                  # harness-level eval cases and fixtures
 ├── scripts/                # small developer utilities
 └── docs/
     ├── index.md
@@ -73,9 +77,10 @@ Target layout for this project:
 ```
 
 Rules for this layout:
-- `domain/` must stay free of network, filesystem, shell, and SDK coupling.
-- `services/` may depend on `domain/` and `ports/`, but not on concrete adapters.
-- `adapters/` implement ports and keep external integration details contained.
+- `agent/context.py` must stay free of provider SDK, shell, and network coupling.
+- `agent/agent_loop.py` owns orchestration, not provider-specific request shaping.
+- `agent/providers/litellm_provider.py` is the only place that should import `litellm`.
+- `agent/providers/registry.py` and `agent/tools/registry.py` should stay small and explicit.
 - `cli/` only wires dependencies and exposes commands.
 - Do not add new top-level directories without a strong reason.
 
@@ -101,8 +106,8 @@ If a task changes architecture, interfaces, or operating rules, update docs in t
 
 ## Testing Rules
 
-- Unit test pure domain and service behavior first.
-- Add integration tests at adapter boundaries.
+- Unit test `Context`, `AgentLoop`, and provider normalization first.
+- Prefer fake providers and fake tools in tests over live network calls.
 - Keep at least one smoke path for the end-to-end harness loop.
 - When fixing a bug, add or update the narrowest test that proves it.
 
@@ -119,8 +124,8 @@ For non-trivial work:
 The first design phase should define:
 - harness scope and explicit non-scope
 - core runtime loop
-- message/task/run data model
+- context and message model
 - tool execution boundary
 - model provider boundary
-- persistence and replay strategy
+- CLI entrypoint for local testing
 - evaluation strategy for early iterations
