@@ -8,6 +8,7 @@ from agentlet.agent.providers.registry import ProviderConfig
 from agentlet.cli import main as cli_main
 from agentlet.cli.chat_app import run_chat_command
 from agentlet.cli.sessions import SessionStore
+from agentlet.settings import default_settings_path
 from conftest import FakeProvider, FakeProviderRegistry, make_cli_args
 
 
@@ -36,35 +37,40 @@ def test_main_chat_prints_response(monkeypatch, capsys) -> None:
     assert captured.out.strip() == "fake response"
 
 
-def test_main_chat_loads_defaults_from_project_dotenv(tmp_path, monkeypatch, capsys) -> None:
+def test_main_chat_loads_defaults_from_user_settings(tmp_path, monkeypatch, capsys) -> None:
     captured_configs: list[ProviderConfig] = []
     monkeypatch.setattr(
         cli_main, "ProviderRegistry", lambda: FakeProviderRegistry(captured_configs)
     )
-    monkeypatch.chdir(tmp_path)
-
-    # Use monkeypatch to temporarily clear env vars
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
-    monkeypatch.delenv("AGENTLET_MODEL", raising=False)
-
-    (tmp_path / ".env").write_text(
-        "OPENAI_API_KEY=dotenv-key\n"
-        "OPENAI_BASE_URL=http://localhost:4000/v1\n"
-        "AGENTLET_MODEL=dotenv-model\n",
+    settings_path = default_settings_path(tmp_path)
+    settings_path.parent.mkdir(parents=True)
+    settings_path.write_text(
+        "{\n"
+        '  "provider": "openai",\n'
+        '  "model": "settings-model",\n'
+        '  "api_key": "settings-key",\n'
+        '  "api_base": "http://localhost:4000/v1",\n'
+        '  "temperature": 0.0,\n'
+        '  "max_tokens": null\n'
+        "}\n",
         encoding="utf-8",
     )
 
-    exit_code = cli_main.main(["chat", "hello from dotenv"])
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    monkeypatch.delenv("AGENTLET_MODEL", raising=False)
+    monkeypatch.delenv("AGENTLET_PROVIDER", raising=False)
+
+    exit_code = cli_main.main(["chat", "hello from settings"], home_dir=tmp_path)
 
     captured = capsys.readouterr()
     assert exit_code == 0
     assert captured.out.strip() == "fake response"
     assert len(captured_configs) == 1
     config = captured_configs[0]
-    assert config.api_key == "dotenv-key"
+    assert config.api_key == "settings-key"
     assert config.api_base == "http://localhost:4000/v1"
-    assert config.model == "dotenv-model"
+    assert config.model == "settings-model"
 
 
 def test_run_chat_command_interactive_resume_latest(tmp_path) -> None:

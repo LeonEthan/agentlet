@@ -3,36 +3,58 @@ from __future__ import annotations
 """CLI entrypoint for local agentlet experiments."""
 
 import argparse
-import os
 import sys
-
-from dotenv import load_dotenv, find_dotenv
+from pathlib import Path
 
 from agentlet.agent.providers.registry import (
-    DEFAULT_MODEL,
-    DEFAULT_PROVIDER,
-    DEFAULT_TEMPERATURE,
     ProviderRegistry,
+)
+from agentlet.settings import (
+    AgentletSettings,
+    SettingsError,
+    default_settings_path,
+    load_settings,
+    resolve_settings_defaults,
+    write_settings,
 )
 from agentlet.agent.tools.registry import ToolRegistry
 from agentlet.cli.chat_app import ChatCLIError, run_chat_command
 
 
-def inject_project_env() -> None:
-    """Load .env file from current or parent directories into os.environ.
-
-    Uses load_dotenv() with override=False to avoid overwriting existing
-    environment variables.
-    """
-    env_path = find_dotenv(usecwd=True)
-    if env_path:
-        load_dotenv(env_path, override=False)
-
-
-def build_parser() -> argparse.ArgumentParser:
+def build_parser(defaults: AgentletSettings) -> argparse.ArgumentParser:
     """Build the small phase-1 CLI surface."""
     parser = argparse.ArgumentParser(prog="agentlet")
     subparsers = parser.add_subparsers(dest="command", required=True)
+
+    init = subparsers.add_parser(
+        "init",
+        help="Create ~/.agentlet/setting.json with the current effective defaults.",
+    )
+    init.add_argument("--provider", default=defaults.provider, help="Provider name to store.")
+    init.add_argument("--model", default=defaults.model, help="Model name to store.")
+    init.add_argument("--api-key", default=defaults.api_key, help="Provider API key to store.")
+    init.add_argument(
+        "--api-base",
+        default=defaults.api_base,
+        help="Optional OpenAI-compatible base URL to store.",
+    )
+    init.add_argument(
+        "--temperature",
+        type=float,
+        default=defaults.temperature,
+        help="Default sampling temperature to store.",
+    )
+    init.add_argument(
+        "--max-tokens",
+        type=int,
+        default=defaults.max_tokens,
+        help="Default max_tokens override to store.",
+    )
+    init.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite an existing settings file.",
+    )
 
     chat = subparsers.add_parser("chat", help="Run agentlet chat in one-shot or interactive mode.")
     chat.add_argument("message", nargs="?", help="User message. Reads from stdin when omitted.")
@@ -60,44 +82,72 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Force one-shot print mode even when stdin is a TTY.",
     )
-    chat.add_argument("--provider", default=DEFAULT_PROVIDER, help="Provider name.")
+    chat.add_argument("--provider", default=defaults.provider, help="Provider name.")
     chat.add_argument(
         "--model",
-        default=os.getenv("AGENTLET_MODEL", DEFAULT_MODEL),
+        default=defaults.model,
         help="Model name.",
     )
     chat.add_argument(
         "--api-key",
-        default=os.getenv("OPENAI_API_KEY"),
+        default=defaults.api_key,
         help="Provider API key.",
     )
     chat.add_argument(
         "--api-base",
-        default=os.getenv("OPENAI_BASE_URL"),
+        default=defaults.api_base,
         help="Optional OpenAI-compatible base URL.",
     )
     chat.add_argument(
         "--temperature",
         type=float,
-        default=DEFAULT_TEMPERATURE,
+        default=defaults.temperature,
         help="Sampling temperature.",
     )
     chat.add_argument(
         "--max-tokens",
         type=int,
-        default=None,
+        default=defaults.max_tokens,
         help="Optional max_tokens override.",
     )
     return parser
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, *, home_dir: Path | None = None) -> int:
     """Parse CLI input and dispatch to the requested command mode."""
-    inject_project_env()
-    # Load .env before building parser defaults so environment-backed defaults
-    # are visible to argparse immediately.
-    parser = build_parser()
-    args = parser.parse_args(argv)
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    settings_path = default_settings_path(home_dir)
+    settings_error: SettingsError | None = None
+    try:
+        stored_settings = load_settings(settings_path)
+    except SettingsError as exc:
+        stored_settings = AgentletSettings()
+        settings_error = exc
+
+    parser = build_parser(resolve_settings_defaults(stored_settings))
+    args = parser.parse_args(raw_argv)
+
+    if args.command == "init":
+        try:
+            written_path = write_settings(
+                AgentletSettings(
+                    provider=args.provider,
+                    model=args.model,
+                    api_key=args.api_key,
+                    api_base=args.api_base,
+                    temperature=args.temperature,
+                    max_tokens=args.max_tokens,
+                ),
+                settings_path=settings_path,
+                force=args.force,
+            )
+        except SettingsError as exc:
+            parser.error(str(exc))
+        print(f"Wrote settings to {written_path}", file=sys.stdout)
+        return 0
+
+    if settings_error is not None:
+        parser.error(str(settings_error))
 
     if args.command != "chat":
         parser.error(f"Unsupported command: {args.command}")
