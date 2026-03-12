@@ -67,4 +67,4 @@ uv run python -m agentlet.cli.main chat "Hello"
 
 - SOCKS proxy support is included through `httpx[socks]`.
 - `LiteLLM` may require provider-prefixed model names for some backends.
-- Detailed design notes live in [`docs/design-docs/phase-1-foundation.md`](docs/design-docs/phase-1-foundation.md).
+- Detailed design notes live in [`docs/design-docs/phase-1-foundation.md`](docs/design-docs/phase-1-foundation.md) and [`docs/design-docs/phase-2-cli-experience.md`](docs/design-docs/phase-2-cli-experience.md).
