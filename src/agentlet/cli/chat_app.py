@@ -204,6 +204,10 @@ def _resolve_chat_mode(args, *, stdin: TextIO, stdin_isatty: bool | None = None)
         return message, False
 
     if args.print_mode:
+        if is_tty:
+            raise ChatCLIError(
+                "--print requires a message argument or redirected stdin."
+            )
         return _read_and_validate_message(stdin), False
 
     if has_resume_flags and not is_tty:

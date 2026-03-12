@@ -6,7 +6,12 @@ import pytest
 
 from agentlet.agent.agent_loop import AgentTurnResult, TurnEvent
 from agentlet.agent.context import Context, ToolCall, ToolResult
-from agentlet.cli.sessions import SessionError, SessionStore, SessionTurnRecorder
+from agentlet.cli.sessions import (
+    SessionError,
+    SessionNotFoundError,
+    SessionStore,
+    SessionTurnRecorder,
+)
 
 
 def test_session_store_round_trips_completed_turns(tmp_path) -> None:
@@ -84,7 +89,7 @@ def test_session_store_round_trips_completed_turns(tmp_path) -> None:
     assert loaded.context.history[-1].content == "done"
 
 
-def test_session_store_marks_started_session_as_latest(tmp_path) -> None:
+def test_session_store_updates_latest_only_after_first_completed_turn(tmp_path) -> None:
     store = SessionStore(tmp_path)
     info = store.start_session(
         provider_name="openai",
@@ -95,7 +100,8 @@ def test_session_store_marks_started_session_as_latest(tmp_path) -> None:
         system_prompt="system",
     )
 
-    assert store.load_latest_session_id() == info.session_id
+    with pytest.raises(SessionNotFoundError, match="No latest session metadata found"):
+        store.load_latest_session_id()
 
     recorder = SessionTurnRecorder()
     recorder.observe(TurnEvent(kind="turn_started", user_input="hello"))

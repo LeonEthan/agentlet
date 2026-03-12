@@ -210,7 +210,6 @@ class SessionStore:
         with info.transcript_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record, ensure_ascii=False, separators=(",", ":")))
             handle.write("\n")
-        self._write_latest(session_id)
         return info
 
     def append_records(
@@ -230,14 +229,7 @@ class SessionStore:
                 handle.write("\n")
 
         if update_latest:
-            # Only update latest file if session_id is different (avoid unnecessary I/O)
-            try:
-                current_latest = self.load_latest_session_id()
-                if current_latest != session_id:
-                    self._write_latest(session_id)
-            except SessionNotFoundError:
-                # No latest file exists yet, write it
-                self._write_latest(session_id)
+            self._write_latest(session_id)
 
     def load_latest_session_id(self) -> str:
         """Read the latest session pointer for the current working directory."""

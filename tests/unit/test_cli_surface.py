@@ -59,6 +59,22 @@ def test_resolve_chat_mode_reads_non_tty_stdin_as_one_shot() -> None:
     assert message == "hello from stdin"
 
 
+def test_resolve_chat_mode_rejects_print_mode_on_interactive_tty_without_message() -> None:
+    args = SimpleNamespace(
+        message=None,
+        print_mode=True,
+        continue_session=False,
+        session_id=None,
+        new_session=False,
+    )
+
+    with pytest.raises(
+        ChatCLIError,
+        match="--print requires a message argument or redirected stdin",
+    ):
+        _resolve_chat_mode(args, stdin=StringIO(""), stdin_isatty=True)
+
+
 def test_resolve_chat_mode_rejects_session_flags_with_non_tty_stdin() -> None:
     args = SimpleNamespace(
         message=None,
