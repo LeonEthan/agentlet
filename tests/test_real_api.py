@@ -1,13 +1,15 @@
-"""Real API integration tests using .env configuration.
+"""Real API integration tests using `~/.agentlet/setting.json`.
 
-This module tests the actual API calls with real credentials from .env file.
+This module tests the actual API calls with real credentials from the user-level
+settings file.
 Run these tests with: python -m pytest tests/test_real_api.py -v
 
 Note: This file relies on conftest.py for sys.path setup. Run with:
     uv run python -m pytest tests/test_real_api.py -v
 
-Or with environment loaded:
-    export $(cat .env | xargs) && uv run python -m pytest tests/test_real_api.py -v
+Or after bootstrapping local settings:
+    agentlet init --api-key your_api_key --api-base https://api.openai.com/v1
+    uv run python -m pytest tests/test_real_api.py -v
 """
 
 from __future__ import annotations
@@ -24,6 +26,7 @@ from agentlet.agent.providers.litellm_provider import LiteLLMProvider
 from agentlet.agent.tools.registry import ToolRegistry, ToolSpec
 from agentlet.agent.prompts.system_prompt import build_system_prompt
 from agentlet.agent.providers.registry import DEFAULT_MODEL, DEFAULT_PROVIDER
+from agentlet.settings import resolve_settings_defaults, load_settings
 
 pytestmark = pytest.mark.real_api
 
@@ -41,41 +44,42 @@ def _get_env_config(
     max_tokens: int | None = None,
     model: str | None = None,
 ) -> ProviderConfig:
-    """Create a ProviderConfig from environment variables.
+    """Create a ProviderConfig from the effective local settings.
 
     This helper reduces duplication across tests.
     """
+    resolved_settings = resolve_settings_defaults(load_settings())
     return ProviderConfig(
-        name=DEFAULT_PROVIDER,
-        model=model or os.getenv("AGENTLET_MODEL", DEFAULT_MODEL),
-        api_key=os.getenv("OPENAI_API_KEY"),
-        api_base=os.getenv("OPENAI_BASE_URL"),
+        name=resolved_settings.provider or DEFAULT_PROVIDER,
+        model=model or resolved_settings.model or DEFAULT_MODEL,
+        api_key=resolved_settings.api_key,
+        api_base=resolved_settings.api_base,
         temperature=temperature,
         max_tokens=max_tokens,
     )
 
 
-class TestEnvLoading:
-    """Test that environment variables are properly loaded."""
+class TestSettingsLoading:
+    """Test that local settings are properly loaded."""
 
     def test_api_key_loaded(self):
-        """Verify OPENAI_API_KEY is loaded from .env."""
-        api_key = os.getenv("OPENAI_API_KEY")
-        assert api_key, "OPENAI_API_KEY not found in environment"
+        """Verify OPENAI_API_KEY-equivalent settings are loaded from setting.json."""
+        api_key = _get_env_config().api_key
+        assert api_key, "API key not found in ~/.agentlet/setting.json or exported env vars"
         assert len(api_key) > 20, f"API key seems too short: {api_key[:10]}..."
         print(f"\n  API Key: {api_key[:15]}... (length: {len(api_key)})")
 
     def test_base_url_loaded(self):
-        """Verify OPENAI_BASE_URL is loaded from .env."""
-        base_url = os.getenv("OPENAI_BASE_URL")
-        assert base_url, "OPENAI_BASE_URL not found in environment"
+        """Verify OPENAI_BASE_URL-equivalent settings are loaded from setting.json."""
+        base_url = _get_env_config().api_base
+        assert base_url, "Base URL not found in ~/.agentlet/setting.json or exported env vars"
         assert base_url.startswith("http"), f"Invalid base URL: {base_url}"
         print(f"\n  Base URL: {base_url}")
 
     def test_model_config_loaded(self):
-        """Verify AGENTLET_MODEL is loaded from .env."""
-        model = os.getenv("AGENTLET_MODEL")
-        assert model, "AGENTLET_MODEL not found in environment"
+        """Verify AGENTLET_MODEL-equivalent settings are loaded from setting.json."""
+        model = _get_env_config().model
+        assert model, "Model not found in ~/.agentlet/setting.json or exported env vars"
         print(f"\n  Model: {model}")
 
 
@@ -83,7 +87,7 @@ class TestProviderConfig:
     """Test LiteLLM provider configuration."""
 
     def test_provider_config_creation(self):
-        """Test ProviderConfig dataclass with env vars."""
+        """Test ProviderConfig dataclass with effective local settings."""
         config = _get_env_config(temperature=0.7, max_tokens=100)
 
         assert config.name == DEFAULT_PROVIDER

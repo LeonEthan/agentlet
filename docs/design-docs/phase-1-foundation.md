@@ -299,7 +299,13 @@ Why this path:
 
 ## 9. CLI Shape
 
-Phase 1 should expose one obvious command, for example:
+Phase 1 should expose one obvious runtime command plus a bootstrap command, for example:
+
+```bash
+uv run python -m agentlet.cli.main init --api-key your_api_key
+```
+
+and:
 
 ```bash
 uv run python -m agentlet.cli.main chat --model gpt-4o-mini
@@ -307,8 +313,9 @@ uv run python -m agentlet.cli.main chat --model gpt-4o-mini
 
 Behavior:
 
+- `init` creates `~/.agentlet/setting.json` with the canonical agentlet config shape
 - read a user message from argv or stdin
-- load `.env` from the current working directory or parent directories before parsing defaults
+- load `~/.agentlet/setting.json` before parsing chat defaults
 - construct `Context`, provider, and tool registry
 - run one turn
 - print the final assistant response
@@ -317,9 +324,9 @@ This is enough to validate the loop before adding a REPL or session persistence.
 
 Environment behavior:
 
-- `.env` values are treated as defaults for `OPENAI_API_KEY`, `OPENAI_BASE_URL`, and `AGENTLET_MODEL`
-- existing shell environment variables must win over `.env`
-- this keeps local real-provider testing simple without hardcoding secrets into commands
+- `setting.json` values are treated as defaults for provider name, model, API key, base URL, temperature, and max tokens
+- exported shell environment variables must win over `setting.json`
+- this keeps local real-provider testing simple without hardcoding secrets into repeated commands
 
 Example local test:
 
@@ -348,7 +355,7 @@ Phase 1 should prefer fake providers in tests over live network calls.
 
 For manual validation outside automated tests:
 
-- use a project `.env` for credentials and endpoint configuration
+- use `~/.agentlet/setting.json` for credentials and endpoint configuration
 - verify at least one real text-only request against an OpenAI-compatible backend
 - keep automated test coverage fake-based to avoid network flakiness
 
@@ -384,7 +391,7 @@ Current recommendation:
 Phase 1 is complete when all of the following are true:
 
 - one CLI command can run a single turn against an OpenAI-compatible endpoint
-- one CLI command can read project `.env` defaults for local real-provider testing
+- one CLI command can read user-level `~/.agentlet/setting.json` defaults for local real-provider testing
 - `AgentLoop`, `Context`, and provider adapter are separate modules
 - tool-call round trips work through the loop
 - the core modules have unit tests

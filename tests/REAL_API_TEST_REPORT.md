@@ -9,10 +9,10 @@
 
 ## 测试覆盖范围
 
-### 1. 环境变量加载测试 (3个测试)
-- ✅ `test_api_key_loaded` - OPENAI_API_KEY 正确加载
-- ✅ `test_base_url_loaded` - OPENAI_BASE_URL 正确加载
-- ✅ `test_model_config_loaded` - AGENTLET_MODEL 正确加载
+### 1. 用户级设置加载测试 (3个测试)
+- ✅ `test_api_key_loaded` - `~/.agentlet/setting.json` 中的 API key 正确加载
+- ✅ `test_base_url_loaded` - `~/.agentlet/setting.json` 中的 Base URL 正确加载
+- ✅ `test_model_config_loaded` - `~/.agentlet/setting.json` 中的模型配置正确加载
 
 ### 2. Provider 配置测试 (2个测试)
 - ✅ `test_provider_config_creation` - ProviderConfig 正确创建
@@ -70,7 +70,7 @@ uv run python -m agentlet.cli.main chat "你的测试消息"
 
 ## 测试验证的功能
 
-1. ✅ .env 文件自动加载
+1. ✅ `~/.agentlet/setting.json` 自动加载
 2. ✅ DeepSeek API 通过 LiteLLM 代理正常工作
 3. ✅ 单次对话生成
 4. ✅ 多轮对话上下文保持
