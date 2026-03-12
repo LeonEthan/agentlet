@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 
 import pytest
 
@@ -167,8 +168,6 @@ def test_main_init_force_repairs_invalid_settings_file(tmp_path, monkeypatch) ->
 
 def test_load_settings_nested_structure(tmp_path, monkeypatch) -> None:
     """Test loading settings with nested env/defaults structure."""
-    import os
-
     settings_path = default_settings_path(tmp_path)
     settings_path.parent.mkdir(parents=True)
     settings_path.write_text(
@@ -191,6 +190,9 @@ def test_load_settings_nested_structure(tmp_path, monkeypatch) -> None:
         encoding="utf-8",
     )
 
+    # Ensure CLEANUP: monkeypatch will restore/deleted env vars after test
+    monkeypatch.delenv("CUSTOM_VAR", raising=False)
+
     loaded = load_settings(settings_path)
 
     assert loaded == AgentletSettings(
@@ -201,13 +203,12 @@ def test_load_settings_nested_structure(tmp_path, monkeypatch) -> None:
         temperature=0.7,
         max_tokens=256,
     )
+    # Verify load_settings() set the env var (monkeypatch will clean up after)
     assert os.environ.get("CUSTOM_VAR") == "custom_value"
 
 
 def test_load_settings_only_env_section(tmp_path, monkeypatch) -> None:
     """Test loading settings with only env section (no defaults)."""
-    import os
-
     settings_path = default_settings_path(tmp_path)
     settings_path.parent.mkdir(parents=True)
     settings_path.write_text(
@@ -222,9 +223,13 @@ def test_load_settings_only_env_section(tmp_path, monkeypatch) -> None:
         encoding="utf-8",
     )
 
+    # Ensure CLEANUP: monkeypatch will restore/deleted env vars after test
+    monkeypatch.delenv("FOO", raising=False)
+
     loaded = load_settings(settings_path)
 
     assert loaded == AgentletSettings()
+    # Verify load_settings() set the env var (monkeypatch will clean up after)
     assert os.environ.get("FOO") == "bar"
 
 
