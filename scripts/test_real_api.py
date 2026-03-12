@@ -18,11 +18,6 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root / "src"))
 
-# Load .env using the shared utility from CLI
-from agentlet.cli.main import inject_project_env
-
-inject_project_env()
-
 from agentlet.agent.agent_loop import AgentLoop
 from agentlet.agent.context import Context, Message
 from agentlet.agent.providers.litellm_provider import LiteLLMProvider

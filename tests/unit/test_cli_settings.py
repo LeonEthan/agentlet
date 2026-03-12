@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 
 import pytest
 
@@ -166,73 +165,6 @@ def test_main_init_force_repairs_invalid_settings_file(tmp_path, monkeypatch) ->
     }
 
 
-def test_load_settings_nested_structure(tmp_path, monkeypatch) -> None:
-    """Test loading settings with nested env/defaults structure."""
-    settings_path = default_settings_path(tmp_path)
-    settings_path.parent.mkdir(parents=True)
-    settings_path.write_text(
-        json.dumps(
-            {
-                "env": {
-                    "CUSTOM_VAR": "custom_value",
-                },
-                "defaults": {
-                    "provider": "openai",
-                    "model": "nested-model",
-                    "api_key": "nested-key",
-                    "api_base": "http://nested.example/v1",
-                    "temperature": 0.7,
-                    "max_tokens": 256,
-                },
-            }
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-
-    # Ensure CLEANUP: monkeypatch will restore/deleted env vars after test
-    monkeypatch.delenv("CUSTOM_VAR", raising=False)
-
-    loaded = load_settings(settings_path)
-
-    assert loaded == AgentletSettings(
-        provider="openai",
-        model="nested-model",
-        api_key="nested-key",
-        api_base="http://nested.example/v1",
-        temperature=0.7,
-        max_tokens=256,
-    )
-    # Verify load_settings() set the env var (monkeypatch will clean up after)
-    assert os.environ.get("CUSTOM_VAR") == "custom_value"
-
-
-def test_load_settings_only_env_section(tmp_path, monkeypatch) -> None:
-    """Test loading settings with only env section (no defaults)."""
-    settings_path = default_settings_path(tmp_path)
-    settings_path.parent.mkdir(parents=True)
-    settings_path.write_text(
-        json.dumps(
-            {
-                "env": {
-                    "FOO": "bar",
-                }
-            }
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-
-    # Ensure CLEANUP: monkeypatch will restore/deleted env vars after test
-    monkeypatch.delenv("FOO", raising=False)
-
-    loaded = load_settings(settings_path)
-
-    assert loaded == AgentletSettings()
-    # Verify load_settings() set the env var (monkeypatch will clean up after)
-    assert os.environ.get("FOO") == "bar"
-
-
 def test_load_settings_only_defaults_section(tmp_path) -> None:
     """Test loading settings with only defaults section (no env)."""
     settings_path = default_settings_path(tmp_path)
@@ -374,19 +306,6 @@ def test_load_settings_rejects_unknown_keys_in_nested_defaults(tmp_path) -> None
     )
 
     with pytest.raises(SettingsError, match="Unsupported settings keys"):
-        load_settings(settings_path)
-
-
-def test_load_settings_rejects_non_object_env(tmp_path) -> None:
-    """Test that non-object env section is rejected."""
-    settings_path = default_settings_path(tmp_path)
-    settings_path.parent.mkdir(parents=True)
-    settings_path.write_text(
-        json.dumps({"env": "not-an-object"}) + "\n",
-        encoding="utf-8",
-    )
-
-    with pytest.raises(SettingsError, match="must be an object"):
         load_settings(settings_path)
 
 

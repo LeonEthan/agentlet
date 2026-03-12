@@ -93,29 +93,8 @@ def _build_settings_from_dict(data: dict[str, Any], path: Path) -> AgentletSetti
     )
 
 
-def _apply_env_section(env_section: dict[str, Any], path: Path) -> None:
-    """Apply env vars from settings file to os.environ with change detection."""
-    if not isinstance(env_section, dict):
-        raise SettingsError(f"Settings key `env` in {path} must be an object.")
-    for key, value in env_section.items():
-        if value is not None:
-            str_value = str(value)
-            if os.environ.get(key) != str_value:
-                os.environ[key] = str_value
-
-
 def _load_nested_settings(payload: dict[str, Any], path: Path) -> AgentletSettings:
-    """Load settings from nested structure with 'env' and 'defaults' sections.
-
-    The 'env' section is applied to os.environ immediately.
-    The 'defaults' section is parsed as AgentletSettings.
-    """
-    # Handle env section - apply to os.environ
-    env_section = payload.get("env")
-    if env_section is not None:
-        _apply_env_section(env_section, path)
-
-    # Handle defaults section
+    """Load settings from nested structure with 'defaults' section."""
     defaults_section = payload.get("defaults")
     if defaults_section is None:
         return AgentletSettings()
@@ -135,8 +114,8 @@ def _load_flat_settings(payload: dict[str, Any], path: Path) -> AgentletSettings
 def load_settings(settings_path: Path | None = None) -> AgentletSettings:
     """Load `settings.json` when present, or return empty defaults.
 
-    Supports both nested structure (with 'env' and 'defaults' sections)
-    and flat structure (backward compatible).
+    Supports both nested structure (with 'defaults' section) and flat
+    structure (backward compatible). The 'env' section is no longer supported.
     """
     path = settings_path or default_settings_path()
     if not path.exists():
@@ -154,9 +133,8 @@ def load_settings(settings_path: Path | None = None) -> AgentletSettings:
     if not isinstance(payload, dict):
         raise SettingsError(f"Settings file must contain a JSON object: {path}")
 
-    # Detect nested structure by presence of 'env' or 'defaults' keys
-    is_nested = "env" in payload or "defaults" in payload
-    if is_nested:
+    # Detect nested structure by presence of 'defaults' key
+    if "defaults" in payload:
         return _load_nested_settings(payload, path)
     else:
         return _load_flat_settings(payload, path)
