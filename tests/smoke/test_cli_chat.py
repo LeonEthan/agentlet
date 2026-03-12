@@ -58,6 +58,8 @@ def test_main_chat_loads_defaults_from_user_settings(tmp_path, monkeypatch, caps
 
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    monkeypatch.delenv("AGENTLET_API_KEY", raising=False)
+    monkeypatch.delenv("AGENTLET_BASE_URL", raising=False)
     monkeypatch.delenv("AGENTLET_MODEL", raising=False)
     monkeypatch.delenv("AGENTLET_PROVIDER", raising=False)
 

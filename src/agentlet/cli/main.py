@@ -28,7 +28,7 @@ def build_parser(defaults: AgentletSettings) -> argparse.ArgumentParser:
 
     init = subparsers.add_parser(
         "init",
-        help="Create ~/.agentlet/setting.json with the current effective defaults.",
+        help="Create ~/.agentlet/settings.json with the current effective defaults.",
     )
     init.add_argument("--provider", default=defaults.provider, help="Provider name to store.")
     init.add_argument("--model", default=defaults.model, help="Model name to store.")

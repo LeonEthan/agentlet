@@ -16,7 +16,8 @@ from agentlet.agent.providers.registry import (
 )
 
 SETTINGS_DIRNAME = ".agentlet"
-SETTINGS_FILENAME = "setting.json"
+SETTINGS_FILENAME = "settings.json"
+SETTINGS_FILENAME_LEGACY = "setting.json"
 
 _STRING_FIELDS = {"provider", "model", "api_key", "api_base"}
 _FLOAT_FIELDS = {"temperature"}
@@ -30,7 +31,7 @@ class SettingsError(ValueError):
 
 @dataclass(frozen=True)
 class AgentletSettings:
-    """Config values persisted in `~/.agentlet/setting.json`."""
+    """Config values persisted in `~/.agentlet/settings.json`."""
 
     provider: str | None = None
     model: str | None = None
@@ -52,13 +53,91 @@ class AgentletSettings:
 
 
 def default_settings_path(home_dir: Path | None = None) -> Path:
-    """Return the canonical `setting.json` path for this user."""
+    """Return the canonical `settings.json` path for this user.
+
+    Prefers `settings.json` (new) over `setting.json` (legacy) if both exist.
+    Returns the new path by default if neither exists.
+    """
     base_dir = home_dir if home_dir is not None else Path.home()
-    return base_dir / SETTINGS_DIRNAME / SETTINGS_FILENAME
+    new_path = base_dir / SETTINGS_DIRNAME / SETTINGS_FILENAME
+    legacy_path = base_dir / SETTINGS_DIRNAME / SETTINGS_FILENAME_LEGACY
+
+    # Prefer new path, but fall back to legacy if only it exists
+    if new_path.exists():
+        return new_path
+    if legacy_path.exists():
+        return legacy_path
+    return new_path  # Default to new path if neither exists
+
+
+def _validate_allowed_fields(data: dict[str, Any], path: Path, context: str = "") -> None:
+    """Validate that data only contains allowed fields."""
+    unknown_fields = sorted(set(data) - _ALLOWED_FIELDS)
+    if unknown_fields:
+        names = ", ".join(unknown_fields)
+        context_str = f" {context}" if context else ""
+        raise SettingsError(f"Unsupported settings keys in {path}{context_str}: {names}")
+
+
+def _build_settings_from_dict(data: dict[str, Any], path: Path) -> AgentletSettings:
+    """Build AgentletSettings from a flat dictionary after validation."""
+    _validate_allowed_fields(data, path)
+
+    return AgentletSettings(
+        provider=_validate_string_field(data, "provider", path),
+        model=_validate_string_field(data, "model", path),
+        api_key=_validate_string_field(data, "api_key", path),
+        api_base=_validate_string_field(data, "api_base", path),
+        temperature=_validate_float_field(data, "temperature", path),
+        max_tokens=_validate_int_field(data, "max_tokens", path),
+    )
+
+
+def _apply_env_section(env_section: dict[str, Any], path: Path) -> None:
+    """Apply env vars from settings file to os.environ with change detection."""
+    if not isinstance(env_section, dict):
+        raise SettingsError(f"Settings key `env` in {path} must be an object.")
+    for key, value in env_section.items():
+        if value is not None:
+            str_value = str(value)
+            if os.environ.get(key) != str_value:
+                os.environ[key] = str_value
+
+
+def _load_nested_settings(payload: dict[str, Any], path: Path) -> AgentletSettings:
+    """Load settings from nested structure with 'env' and 'defaults' sections.
+
+    The 'env' section is applied to os.environ immediately.
+    The 'defaults' section is parsed as AgentletSettings.
+    """
+    # Handle env section - apply to os.environ
+    env_section = payload.get("env")
+    if env_section is not None:
+        _apply_env_section(env_section, path)
+
+    # Handle defaults section
+    defaults_section = payload.get("defaults")
+    if defaults_section is None:
+        return AgentletSettings()
+
+    if not isinstance(defaults_section, dict):
+        raise SettingsError(f"Settings key `defaults` in {path} must be an object.")
+
+    _validate_allowed_fields(defaults_section, path, "defaults")
+    return _build_settings_from_dict(defaults_section, path)
+
+
+def _load_flat_settings(payload: dict[str, Any], path: Path) -> AgentletSettings:
+    """Load settings from flat structure (backward compatible)."""
+    return _build_settings_from_dict(payload, path)
 
 
 def load_settings(settings_path: Path | None = None) -> AgentletSettings:
-    """Load `setting.json` when present, or return empty defaults."""
+    """Load `settings.json` when present, or return empty defaults.
+
+    Supports both nested structure (with 'env' and 'defaults' sections)
+    and flat structure (backward compatible).
+    """
     path = settings_path or default_settings_path()
     if not path.exists():
         return AgentletSettings()
@@ -75,19 +154,30 @@ def load_settings(settings_path: Path | None = None) -> AgentletSettings:
     if not isinstance(payload, dict):
         raise SettingsError(f"Settings file must contain a JSON object: {path}")
 
-    unknown_fields = sorted(set(payload) - _ALLOWED_FIELDS)
-    if unknown_fields:
-        names = ", ".join(unknown_fields)
-        raise SettingsError(f"Unsupported settings keys in {path}: {names}")
+    # Detect nested structure by presence of 'env' or 'defaults' keys
+    is_nested = "env" in payload or "defaults" in payload
+    if is_nested:
+        return _load_nested_settings(payload, path)
+    else:
+        return _load_flat_settings(payload, path)
 
-    return AgentletSettings(
-        provider=_validate_string_field(payload, "provider", path),
-        model=_validate_string_field(payload, "model", path),
-        api_key=_validate_string_field(payload, "api_key", path),
-        api_base=_validate_string_field(payload, "api_base", path),
-        temperature=_validate_float_field(payload, "temperature", path),
-        max_tokens=_validate_int_field(payload, "max_tokens", path),
-    )
+
+def _resolve_api_key(env_values: Mapping[str, str], stored_value: str | None) -> str | None:
+    """Resolve API key with precedence: AGENTLET_API_KEY > OPENAI_API_KEY > stored > None."""
+    if "AGENTLET_API_KEY" in env_values:
+        return env_values["AGENTLET_API_KEY"]
+    if "OPENAI_API_KEY" in env_values:
+        return env_values["OPENAI_API_KEY"]
+    return stored_value
+
+
+def _resolve_api_base(env_values: Mapping[str, str], stored_value: str | None) -> str | None:
+    """Resolve API base with precedence: AGENTLET_BASE_URL > OPENAI_BASE_URL > stored > None."""
+    if "AGENTLET_BASE_URL" in env_values:
+        return env_values["AGENTLET_BASE_URL"]
+    if "OPENAI_BASE_URL" in env_values:
+        return env_values["OPENAI_BASE_URL"]
+    return stored_value
 
 
 def resolve_settings_defaults(
@@ -110,13 +200,8 @@ def resolve_settings_defaults(
             stored_settings.model,
             DEFAULT_MODEL,
         ),
-        api_key=_resolve_string_env(env_values, "OPENAI_API_KEY", stored_settings.api_key, None),
-        api_base=_resolve_string_env(
-            env_values,
-            "OPENAI_BASE_URL",
-            stored_settings.api_base,
-            None,
-        ),
+        api_key=_resolve_api_key(env_values, stored_settings.api_key),
+        api_base=_resolve_api_base(env_values, stored_settings.api_base),
         temperature=stored_settings.temperature
         if stored_settings.temperature is not None
         else DEFAULT_TEMPERATURE,
