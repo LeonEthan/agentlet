@@ -1,40 +1,14 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
 
 import pytest
 
 from agentlet.agent.agent_loop import AgentLoop, MaxIterationsExceeded
-from agentlet.agent.context import ToolCall
-from agentlet.agent.providers.registry import LLMResponse
-from agentlet.agent.tools.registry import ToolRegistry, ToolSpec
-
-
-class FakeProvider:
-    def __init__(self, responses: list[LLMResponse]) -> None:
-        self._responses = list(responses)
-        self.seen_messages: list[list[str]] = []
-
-    async def complete(self, messages, tools=None, model=None, temperature=None, max_tokens=None):
-        self.seen_messages.append([message.role for message in messages])
-        return self._responses.pop(0)
-
-
-@dataclass(frozen=True)
-class EchoTool:
-    spec: ToolSpec = ToolSpec(
-        name="echo",
-        description="Return the same text.",
-        parameters={
-            "type": "object",
-            "properties": {"text": {"type": "string"}},
-            "required": ["text"],
-        },
-    )
-
-    async def execute(self, arguments: dict[str, str]) -> str:
-        return arguments["text"]
+from agentlet.agent.context import Context, ToolCall
+from agentlet.agent.providers.registry import LLMResponse, ProviderStreamEvent
+from agentlet.agent.tools.registry import ToolRegistry
+from conftest import EchoTool, FakeProvider
 
 
 def test_agent_loop_returns_direct_response() -> None:
@@ -124,8 +98,6 @@ def test_agent_loop_does_not_mutate_context_when_provider_fails() -> None:
         ):
             raise RuntimeError("boom")
 
-    from agentlet.agent.context import Context
-
     context = Context(system_prompt="system")
     loop = AgentLoop(provider=BoomProvider())
 
@@ -137,17 +109,12 @@ def test_agent_loop_does_not_mutate_context_when_provider_fails() -> None:
 
 def test_agent_loop_does_not_mutate_context_when_tool_execution_fails() -> None:
     class BoomTool:
-        spec: ToolSpec = ToolSpec(
-            name="echo",
-            description="Raise an error.",
-            parameters={"type": "object", "properties": {}},
-        )
+        spec = EchoTool.spec
 
         async def execute(self, arguments: dict[str, str]) -> str:
             raise RuntimeError("tool boom")
 
-    from agentlet.agent.context import Context
-
+    context = Context(system_prompt="system")
     provider = FakeProvider(
         [
             LLMResponse(
@@ -163,7 +130,6 @@ def test_agent_loop_does_not_mutate_context_when_tool_execution_fails() -> None:
             ),
         ]
     )
-    context = Context(system_prompt="system")
     loop = AgentLoop(
         provider=provider,
         tool_registry=ToolRegistry([BoomTool()]),
@@ -173,3 +139,39 @@ def test_agent_loop_does_not_mutate_context_when_tool_execution_fails() -> None:
         asyncio.run(loop.run_turn("say hello", context=context))
 
     assert context.history == []
+
+
+def test_agent_loop_emits_stream_events_and_commits_final_state() -> None:
+    provider = FakeProvider(
+        [],
+        stream_events=[
+            ProviderStreamEvent(kind="content_delta", text="hel"),
+            ProviderStreamEvent(kind="content_delta", text="lo"),
+            ProviderStreamEvent(
+                kind="response_complete",
+                response=LLMResponse(content="hello", finish_reason="stop"),
+            ),
+        ],
+    )
+    loop = AgentLoop(provider=provider)
+    from agentlet.agent.agent_loop import TurnEvent
+
+    events: list[TurnEvent] = []
+
+    result = asyncio.run(
+        loop.run_turn(
+            "hello",
+            event_sink=events.append,
+            stream=True,
+        )
+    )
+
+    assert result.output == "hello"
+    assert [message.role for message in result.context.history] == ["user", "assistant"]
+    assert [event.kind for event in events] == [
+        "turn_started",
+        "assistant_delta",
+        "assistant_delta",
+        "assistant_completed",
+        "turn_completed",
+    ]

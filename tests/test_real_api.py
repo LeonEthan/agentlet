@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 import asyncio
+import importlib.util
 import pytest
 
 from agentlet.agent.agent_loop import AgentLoop, AgentTurnResult
@@ -22,10 +23,17 @@ from agentlet.agent.providers.registry import ProviderConfig, ProviderRegistry
 from agentlet.agent.providers.litellm_provider import LiteLLMProvider
 from agentlet.agent.tools.registry import ToolRegistry, ToolSpec
 from agentlet.agent.prompts.system_prompt import build_system_prompt
+from agentlet.agent.providers.registry import DEFAULT_MODEL, DEFAULT_PROVIDER
 
-# Default provider name used across tests
-DEFAULT_PROVIDER = "openai"
-DEFAULT_MODEL_FALLBACK = "gpt-4o-mini"
+pytestmark = pytest.mark.real_api
+
+if os.getenv("AGENTLET_RUN_REAL_API_TESTS") != "1":
+    pytest.skip("Set AGENTLET_RUN_REAL_API_TESTS=1 to run live API tests.", allow_module_level=True)
+
+if importlib.util.find_spec("litellm") is None:
+    pytest.skip("litellm is not installed in the active environment.", allow_module_level=True)
+
+# Default provider name used across tests - use shared constants
 
 
 def _get_env_config(
@@ -39,7 +47,7 @@ def _get_env_config(
     """
     return ProviderConfig(
         name=DEFAULT_PROVIDER,
-        model=model or os.getenv("AGENTLET_MODEL", DEFAULT_MODEL_FALLBACK),
+        model=model or os.getenv("AGENTLET_MODEL", DEFAULT_MODEL),
         api_key=os.getenv("OPENAI_API_KEY"),
         api_base=os.getenv("OPENAI_BASE_URL"),
         temperature=temperature,
@@ -267,31 +275,16 @@ class TestToolExecution:
 
     @pytest.fixture
     def echo_tool(self):
-        """Create a simple echo tool for testing."""
-        from dataclasses import dataclass
-
-        @dataclass
-        class EchoTool:
-            spec = ToolSpec(
-                name="echo",
-                description="Echo the input message back",
-                parameters={
-                    "type": "object",
-                    "properties": {
-                        "message": {
-                            "type": "string",
-                            "description": "The message to echo"
-                        }
-                    },
-                    "required": ["message"]
-                }
-            )
-
-            async def execute(self, arguments: dict) -> str:
-                msg = arguments.get("message", "")
-                return f"ECHO: {msg}"
-
-        return EchoTool()
+        """Import echo tool from conftest to avoid duplication."""
+        # Import from conftest - pytest makes this available
+        import sys
+        from pathlib import Path
+        conftest_path = Path(__file__).parent / "conftest.py"
+        spec = importlib.util.spec_from_file_location("conftest", conftest_path)
+        conftest = importlib.util.module_from_spec(spec)
+        sys.modules["conftest_local"] = conftest
+        spec.loader.exec_module(conftest)
+        return conftest.EchoTool()
 
     @pytest.mark.asyncio
     async def test_tool_registry_execution(self, echo_tool):
@@ -321,7 +314,7 @@ class TestErrorHandling:
         """Test behavior with invalid API key."""
         config = ProviderConfig(
             name=DEFAULT_PROVIDER,
-            model=os.getenv("AGENTLET_MODEL", DEFAULT_MODEL_FALLBACK),
+            model=os.getenv("AGENTLET_MODEL", DEFAULT_MODEL),
             api_key="invalid-key-12345",
             api_base=os.getenv("OPENAI_BASE_URL"),
         )

@@ -12,6 +12,8 @@ dependencies = [
     "httpx[socks]>=0.28.0",
     "litellm>=1.63.0",
     "python-dotenv>=1.0.0",
+    "prompt_toolkit>=3.0.43",
+    "rich>=13.9.0",
 ]
 
 [project.optional-dependencies]
@@ -32,3 +34,6 @@ where = ["src"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    "real_api: tests that require live provider credentials and network access",
+]

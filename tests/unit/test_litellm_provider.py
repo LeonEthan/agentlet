@@ -140,3 +140,91 @@ def test_litellm_provider_serializes_dict_tool_arguments_as_json() -> None:
     response = asyncio.run(provider.complete([Message(role="user", content="hello")]))
 
     assert response.tool_calls[0].arguments_json == '{"text": "hello"}'
+
+
+def test_litellm_provider_normalizes_streaming_deltas_and_tool_calls() -> None:
+    captured: dict[str, object] = {}
+
+    async def fake_stream_completion(**kwargs):
+        captured.update(kwargs)
+
+        async def _stream():
+            yield {
+                "choices": [
+                    {
+                        "delta": {"content": "hel"},
+                        "finish_reason": None,
+                    }
+                ]
+            }
+            yield {
+                "choices": [
+                    {
+                        "delta": {
+                            "content": "lo",
+                            "tool_calls": [
+                                {
+                                    "index": 0,
+                                    "id": "call-1",
+                                    "function": {
+                                        "name": "echo",
+                                        "arguments": '{"te',
+                                    },
+                                }
+                            ],
+                        },
+                        "finish_reason": None,
+                    }
+                ]
+            }
+            yield {
+                "choices": [
+                    {
+                        "delta": {
+                            "tool_calls": [
+                                {
+                                    "index": 0,
+                                    "function": {
+                                        "arguments": 'xt":"hello"}',
+                                    },
+                                }
+                            ]
+                        },
+                        "finish_reason": "tool_calls",
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 1,
+                    "completion_tokens": 2,
+                    "total_tokens": 3,
+                },
+            }
+
+        return _stream()
+
+    provider = LiteLLMProvider(
+        ProviderConfig(model="gpt-4o-mini"),
+        stream_completion_func=fake_stream_completion,
+    )
+
+    events = asyncio.run(
+        _collect_stream_events(provider.stream_complete([Message(role="user", content="hello")]))
+    )
+
+    assert captured["stream"] is True
+    assert [event.kind for event in events] == [
+        "content_delta",
+        "content_delta",
+        "response_complete",
+    ]
+    final_response = events[-1].response
+    assert final_response is not None
+    assert final_response.content == "hello"
+    assert final_response.finish_reason == "tool_calls"
+    assert final_response.tool_calls[0].arguments_json == '{"text":"hello"}'
+    assert final_response.usage is not None
+    assert final_response.usage.total_tokens == 3
+
+
+async def _collect_stream_events(stream) -> list:
+    return [event async for event in stream]

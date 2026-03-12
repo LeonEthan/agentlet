@@ -2,11 +2,13 @@ from __future__ import annotations
 
 """Core orchestration loop for a single agent turn."""
 
+from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Literal
 
-from agentlet.agent.context import Context
+from agentlet.agent.context import Context, ToolCall, ToolResult
 from agentlet.agent.prompts.system_prompt import build_system_prompt
-from agentlet.agent.providers.registry import LLMProvider
+from agentlet.agent.providers.registry import LLMProvider, LLMResponse
 from agentlet.agent.tools.registry import ToolRegistry
 
 
@@ -18,6 +20,30 @@ class AgentTurnResult:
     context: Context
     iterations: int
     finish_reason: str | None = None
+
+
+@dataclass(frozen=True)
+class TurnEvent:
+    """Normalized runtime signal exposed to the CLI layer."""
+
+    kind: Literal[
+        "turn_started",
+        "assistant_delta",
+        "assistant_completed",
+        "tool_requested",
+        "tool_started",
+        "tool_completed",
+        "turn_completed",
+        "turn_failed",
+    ]
+    user_input: str | None = None
+    text: str | None = None
+    content: str | None = None
+    tool_calls: tuple[ToolCall, ...] = ()
+    tool_call: ToolCall | None = None
+    tool_result: ToolResult | None = None
+    result: AgentTurnResult | None = None
+    error: BaseException | None = None
 
 
 class MaxIterationsExceeded(RuntimeError):
@@ -49,6 +75,8 @@ class AgentLoop:
         user_input: str,
         *,
         context: Context | None = None,
+        event_sink: Callable[[TurnEvent], None] | None = None,
+        stream: bool = False,
     ) -> AgentTurnResult:
         """Run one user turn until the model produces a final assistant answer.
 
@@ -59,43 +87,112 @@ class AgentLoop:
         if not user_input.strip():
             raise ValueError("user_input must not be empty.")
 
-        base_context = context or Context(system_prompt=self.system_prompt)
-        # Copy the history so partial progress does not leak into the caller's
-        # context until the turn is known to be successful.
-        active_context = Context(
-            system_prompt=base_context.system_prompt,
-            history=base_context.history,
-        )
-        messages = active_context.build_messages(user_input)
-        tool_schemas = self.tool_registry.get_tool_schemas() or None
+        self._emit(event_sink, TurnEvent(kind="turn_started", user_input=user_input))
 
-        for iteration in range(1, self.max_iterations + 1):
-            response = await self.provider.complete(messages, tools=tool_schemas)
-            active_context.add_assistant_message(
-                response.content,
-                list(response.tool_calls),
+        try:
+            base_context = context or Context(system_prompt=self.system_prompt)
+            # Copy the history so partial progress does not leak into the caller's
+            # context until the turn is known to be successful.
+            active_context = Context(
+                system_prompt=base_context.system_prompt,
+                history=base_context.history,
             )
+            messages = active_context.build_messages(user_input)
+            tool_schemas = self.tool_registry.get_tool_schemas() or None
 
-            if not response.tool_calls:
-                # Commit the successful turn back into the caller-provided
-                # context only after all provider/tool work has completed.
-                if context is not None:
-                    context.history[:] = active_context.history
-                return AgentTurnResult(
-                    output=response.content or "",
-                    context=context or active_context,
-                    iterations=iteration,
-                    finish_reason=response.finish_reason,
+            for iteration in range(1, self.max_iterations + 1):
+                response = await self._run_provider_turn(
+                    messages=messages,
+                    tools=tool_schemas,
+                    event_sink=event_sink,
+                    stream=stream,
+                )
+                active_context.add_assistant_message(
+                    response.content,
+                    list(response.tool_calls),
+                )
+                self._emit(
+                    event_sink,
+                    TurnEvent(
+                        kind="assistant_completed",
+                        content=response.content,
+                        tool_calls=response.tool_calls,
+                    ),
                 )
 
-            for call in response.tool_calls:
-                # Tool results become regular messages so the next model call can
-                # reason over them using the same message abstraction.
-                result = await self.tool_registry.execute(call)
-                active_context.add_tool_result(result)
+                if not response.tool_calls:
+                    # Commit the successful turn back into the caller-provided
+                    # context only after all provider/tool work has completed.
+                    if context is not None:
+                        context.history[:] = active_context.history
+                    result = AgentTurnResult(
+                        output=response.content or "",
+                        context=context or active_context,
+                        iterations=iteration,
+                        finish_reason=response.finish_reason,
+                    )
+                    self._emit(
+                        event_sink,
+                        TurnEvent(kind="turn_completed", result=result),
+                    )
+                    return result
 
-            messages = active_context.build_messages()
+                for call in response.tool_calls:
+                    self._emit(
+                        event_sink,
+                        TurnEvent(kind="tool_requested", tool_call=call),
+                    )
+                    self._emit(
+                        event_sink,
+                        TurnEvent(kind="tool_started", tool_call=call),
+                    )
+                    # Tool results become regular messages so the next model call can
+                    # reason over them using the same message abstraction.
+                    result = await self.tool_registry.execute(call)
+                    active_context.add_tool_result(result)
+                    self._emit(
+                        event_sink,
+                        TurnEvent(kind="tool_completed", tool_result=result),
+                    )
 
-        raise MaxIterationsExceeded(
-            f"Agent loop exceeded max_iterations={self.max_iterations}."
-        )
+                messages = active_context.build_messages()
+
+            raise MaxIterationsExceeded(
+                f"Agent loop exceeded max_iterations={self.max_iterations}."
+            )
+        except BaseException as exc:
+            self._emit(event_sink, TurnEvent(kind="turn_failed", error=exc))
+            raise
+
+    async def _run_provider_turn(
+        self,
+        *,
+        messages,
+        tools,
+        event_sink: Callable[[TurnEvent], None] | None,
+        stream: bool,
+    ) -> LLMResponse:
+        if not stream:
+            return await self.provider.complete(messages, tools=tools)
+
+        final_response: LLMResponse | None = None
+        async for event in self.provider.stream_complete(messages, tools=tools):
+            if event.kind == "content_delta" and event.text:
+                self._emit(
+                    event_sink,
+                    TurnEvent(kind="assistant_delta", text=event.text),
+                )
+            elif event.kind == "response_complete":
+                final_response = event.response
+
+        if final_response is None:
+            raise RuntimeError("Provider stream did not produce a final response.")
+        return final_response
+
+    def _emit(
+        self,
+        event_sink: Callable[[TurnEvent], None] | None,
+        event: TurnEvent,
+    ) -> None:
+        if event_sink is not None:
+            event_sink(event)

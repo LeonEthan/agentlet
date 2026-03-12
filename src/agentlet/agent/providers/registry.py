@@ -2,8 +2,9 @@ from __future__ import annotations
 
 """Provider-facing contracts and a minimal runtime registry."""
 
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from typing import Callable, Protocol
+from typing import Callable, Literal, Protocol
 
 from agentlet.agent.context import Message, ToolCall
 from agentlet.agent.tools.registry import ToolSpec
@@ -29,14 +30,29 @@ class LLMResponse:
 
 
 @dataclass(frozen=True)
+class ProviderStreamEvent:
+    """Normalized streaming event emitted by provider adapters."""
+
+    kind: Literal["content_delta", "response_complete"]
+    text: str | None = None
+    response: LLMResponse | None = None
+
+
+# Default provider configuration values
+DEFAULT_PROVIDER: str = "openai"
+DEFAULT_MODEL: str = "gpt-4o-mini"
+DEFAULT_TEMPERATURE: float = 0.0
+
+
+@dataclass(frozen=True)
 class ProviderConfig:
     """Configuration shared by provider adapters."""
 
-    name: str = "openai"
-    model: str = "gpt-4o-mini"
+    name: str = DEFAULT_PROVIDER
+    model: str = DEFAULT_MODEL
     api_key: str | None = None
     api_base: str | None = None
-    temperature: float = 0.0
+    temperature: float = DEFAULT_TEMPERATURE
     max_tokens: int | None = None
 
 
@@ -51,6 +67,15 @@ class LLMProvider(Protocol):
         temperature: float | None = None,
         max_tokens: int | None = None,
     ) -> LLMResponse: ...
+
+    def stream_complete(
+        self,
+        messages: list[Message],
+        tools: list[ToolSpec] | None = None,
+        model: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+    ) -> AsyncIterator[ProviderStreamEvent]: ...
 
 
 ProviderFactory = Callable[[ProviderConfig], LLMProvider]
