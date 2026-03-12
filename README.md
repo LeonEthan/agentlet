@@ -6,11 +6,12 @@ A minimal Python agent harness.
 
 Current phase:
 
-- single-turn agent loop
+- single-process agent loop with tool support
+- interactive TTY chat with streaming output
+- resumable cwd-scoped sessions under `.agentlet/sessions/`
 - independent `Context`
 - `LiteLLM` provider integration
-- OpenAI-compatible local testing path
-- project-level `.env` loading for real API testing
+- project-level `.env` loading for local testing
 
 ## Setup
 
@@ -23,7 +24,7 @@ uv sync
 Run tests:
 
 ```bash
-python3 -m pytest tests
+uv run pytest
 ```
 
 ## Real API Testing
@@ -45,6 +46,12 @@ Run a real request:
 uv run python -m agentlet.cli.main chat "Hello, introduce yourself briefly."
 ```
 
+Run the live API test suite explicitly:
+
+```bash
+AGENTLET_RUN_REAL_API_TESTS=1 uv run pytest tests/test_real_api.py -v
+```
+
 ## DeepSeek Example
 
 DeepSeek works through the OpenAI-compatible path, but the model name must follow LiteLLM's provider-prefixed format.
@@ -63,8 +70,38 @@ Run:
 uv run python -m agentlet.cli.main chat "Hello"
 ```
 
+## CLI Usage
+
+One-shot:
+
+```bash
+agentlet chat "hello"
+echo "hello" | agentlet chat
+agentlet chat --print < prompt.txt
+```
+
+Interactive:
+
+```bash
+agentlet chat
+agentlet chat --continue
+agentlet chat --session 20260312T120000000000Z-deadbeef
+agentlet chat --new-session
+```
+
+Interactive commands:
+
+- `/help`
+- `/status`
+- `/history`
+- `/new`
+- `/clear`
+- `/exit`
+
 ## Notes
 
 - SOCKS proxy support is included through `httpx[socks]`.
 - `LiteLLM` may require provider-prefixed model names for some backends.
+- Interactive sessions persist only completed turns; cancelled or failed turns are not committed.
+- Session headers persist non-sensitive provider settings so resumed chats keep the same model endpoint and sampling limits.
 - Detailed design notes live in [`docs/design-docs/phase-1-foundation.md`](docs/design-docs/phase-1-foundation.md) and [`docs/design-docs/phase-2-cli-experience.md`](docs/design-docs/phase-2-cli-experience.md).
