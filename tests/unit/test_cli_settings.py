@@ -320,3 +320,211 @@ def test_load_settings_rejects_non_object_defaults(tmp_path) -> None:
 
     with pytest.raises(SettingsError, match="must be an object"):
         load_settings(settings_path)
+
+
+# Provider-specific API key resolution tests
+def test_resolve_api_key_anthropic(monkeypatch) -> None:
+    """Test that ANTHROPIC_API_KEY is used for anthropic provider."""
+    monkeypatch.delenv("AGENTLET_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-key")
+
+    resolved = resolve_settings_defaults(
+        AgentletSettings(provider="anthropic", api_key="file-key"),
+    )
+
+    assert resolved.api_key == "anthropic-key"
+
+
+def test_resolve_api_key_gemini(monkeypatch) -> None:
+    """Test that GEMINI_API_KEY is used for gemini provider."""
+    monkeypatch.delenv("AGENTLET_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("GEMINI_API_KEY", "gemini-key")
+
+    resolved = resolve_settings_defaults(
+        AgentletSettings(provider="gemini", api_key="file-key"),
+    )
+
+    assert resolved.api_key == "gemini-key"
+
+
+def test_resolve_api_key_azure(monkeypatch) -> None:
+    """Test that AZURE_API_KEY is used for azure provider."""
+    monkeypatch.delenv("AGENTLET_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("AZURE_API_KEY", "azure-key")
+
+    resolved = resolve_settings_defaults(
+        AgentletSettings(provider="azure", api_key="file-key"),
+    )
+
+    assert resolved.api_key == "azure-key"
+
+
+def test_resolve_api_key_groq(monkeypatch) -> None:
+    """Test that GROQ_API_KEY is used for groq provider."""
+    monkeypatch.delenv("AGENTLET_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("GROQ_API_KEY", "groq-key")
+
+    resolved = resolve_settings_defaults(
+        AgentletSettings(provider="groq", api_key="file-key"),
+    )
+
+    assert resolved.api_key == "groq-key"
+
+
+def test_resolve_api_key_together_ai(monkeypatch) -> None:
+    """Test that TOGETHERAI_API_KEY is used for together_ai provider."""
+    monkeypatch.delenv("AGENTLET_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("TOGETHERAI_API_KEY", "together-key")
+
+    resolved = resolve_settings_defaults(
+        AgentletSettings(provider="together_ai", api_key="file-key"),
+    )
+
+    assert resolved.api_key == "together-key"
+
+
+def test_resolve_api_key_agentlet_over_provider(monkeypatch) -> None:
+    """Test that AGENTLET_API_KEY takes precedence over provider-specific key."""
+    monkeypatch.setenv("AGENTLET_API_KEY", "agentlet-key")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-key")
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-key")
+
+    resolved = resolve_settings_defaults(
+        AgentletSettings(provider="anthropic", api_key="file-key"),
+    )
+
+    assert resolved.api_key == "agentlet-key"
+
+
+def test_resolve_api_key_provider_over_openai(monkeypatch) -> None:
+    """Test that provider-specific key takes precedence over OPENAI_API_KEY."""
+    monkeypatch.delenv("AGENTLET_API_KEY", raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-key")
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-key")
+
+    resolved = resolve_settings_defaults(
+        AgentletSettings(provider="anthropic", api_key="file-key"),
+    )
+
+    assert resolved.api_key == "anthropic-key"
+
+
+def test_resolve_api_key_openai_provider_uses_openai_env(monkeypatch) -> None:
+    """Test that OPENAI_API_KEY is used for openai provider when no AGENTLET_API_KEY."""
+    monkeypatch.delenv("AGENTLET_API_KEY", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-key")
+
+    resolved = resolve_settings_defaults(
+        AgentletSettings(provider="openai", api_key="file-key"),
+    )
+
+    assert resolved.api_key == "openai-key"
+
+
+# Provider-specific base URL resolution tests
+def test_resolve_api_base_anthropic(monkeypatch) -> None:
+    """Test that ANTHROPIC_BASE_URL is used for anthropic provider."""
+    monkeypatch.delenv("AGENTLET_BASE_URL", raising=False)
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "http://anthropic.example/v1")
+
+    resolved = resolve_settings_defaults(
+        AgentletSettings(provider="anthropic", api_base="http://file.example/v1"),
+    )
+
+    assert resolved.api_base == "http://anthropic.example/v1"
+
+
+def test_resolve_api_base_azure(monkeypatch) -> None:
+    """Test that AZURE_API_BASE is used for azure provider."""
+    monkeypatch.delenv("AGENTLET_BASE_URL", raising=False)
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    monkeypatch.setenv("AZURE_API_BASE", "http://azure.example/v1")
+
+    resolved = resolve_settings_defaults(
+        AgentletSettings(provider="azure", api_base="http://file.example/v1"),
+    )
+
+    assert resolved.api_base == "http://azure.example/v1"
+
+
+def test_resolve_api_base_together_ai(monkeypatch) -> None:
+    """Test that TOGETHERAI_BASE_URL is used for together_ai provider."""
+    monkeypatch.delenv("AGENTLET_BASE_URL", raising=False)
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    monkeypatch.setenv("TOGETHERAI_BASE_URL", "http://together.example/v1")
+
+    resolved = resolve_settings_defaults(
+        AgentletSettings(provider="together_ai", api_base="http://file.example/v1"),
+    )
+
+    assert resolved.api_base == "http://together.example/v1"
+
+
+def test_resolve_api_base_agentlet_over_provider(monkeypatch) -> None:
+    """Test that AGENTLET_BASE_URL takes precedence over provider-specific base URL."""
+    monkeypatch.setenv("AGENTLET_BASE_URL", "http://agentlet.example/v1")
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "http://anthropic.example/v1")
+    monkeypatch.setenv("OPENAI_BASE_URL", "http://openai.example/v1")
+
+    resolved = resolve_settings_defaults(
+        AgentletSettings(provider="anthropic", api_base="http://file.example/v1"),
+    )
+
+    assert resolved.api_base == "http://agentlet.example/v1"
+
+
+def test_resolve_api_base_provider_over_openai(monkeypatch) -> None:
+    """Test that provider-specific base URL takes precedence over OPENAI_BASE_URL."""
+    monkeypatch.delenv("AGENTLET_BASE_URL", raising=False)
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "http://anthropic.example/v1")
+    monkeypatch.setenv("OPENAI_BASE_URL", "http://openai.example/v1")
+
+    resolved = resolve_settings_defaults(
+        AgentletSettings(provider="anthropic", api_base="http://file.example/v1"),
+    )
+
+    assert resolved.api_base == "http://anthropic.example/v1"
+
+
+def test_resolve_api_base_no_provider_uses_openai_fallback(monkeypatch) -> None:
+    """Test that OPENAI_BASE_URL is used when no provider is set."""
+    monkeypatch.delenv("AGENTLET_BASE_URL", raising=False)
+    monkeypatch.setenv("OPENAI_BASE_URL", "http://openai.example/v1")
+
+    resolved = resolve_settings_defaults(
+        AgentletSettings(api_base="http://file.example/v1"),
+    )
+
+    assert resolved.api_base == "http://openai.example/v1"
+
+
+def test_resolve_api_key_no_provider_uses_openai_fallback(monkeypatch) -> None:
+    """Test that OPENAI_API_KEY is used when no provider is set."""
+    monkeypatch.delenv("AGENTLET_API_KEY", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-key")
+
+    resolved = resolve_settings_defaults(
+        AgentletSettings(api_key="file-key"),
+    )
+
+    assert resolved.api_key == "openai-key"
+
+
+def test_resolve_settings_defaults_prefers_env_provider_over_stored(monkeypatch) -> None:
+    """Test that AGENTLET_PROVIDER env var takes precedence over stored value."""
+    monkeypatch.delenv("AGENTLET_API_KEY", raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-key")
+    monkeypatch.setenv("AGENTLET_PROVIDER", "anthropic")
+
+    resolved = resolve_settings_defaults(
+        AgentletSettings(provider="openai", api_key="file-key"),
+    )
+
+    assert resolved.provider == "anthropic"
+    assert resolved.api_key == "anthropic-key"
