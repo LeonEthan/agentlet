@@ -115,7 +115,7 @@ def load_settings(settings_path: Path | None = None) -> AgentletSettings:
     """Load `settings.json` when present, or return empty defaults.
 
     Supports both nested structure (with 'defaults' section) and flat
-    structure (backward compatible). The 'env' section is no longer supported.
+    structure (backward compatible).
     """
     path = settings_path or default_settings_path()
     if not path.exists():
