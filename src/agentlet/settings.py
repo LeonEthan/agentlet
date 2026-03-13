@@ -21,7 +21,8 @@ SETTINGS_FILENAME_LEGACY = "setting.json"
 _STRING_FIELDS = {"provider", "model", "api_key", "api_base"}
 _FLOAT_FIELDS = {"temperature"}
 _INT_FIELDS = {"max_tokens"}
-_ALLOWED_FIELDS = _STRING_FIELDS | _FLOAT_FIELDS | _INT_FIELDS
+_BOOL_FIELDS = {"allow_write", "allow_bash", "allow_network"}
+_ALLOWED_FIELDS = _STRING_FIELDS | _FLOAT_FIELDS | _INT_FIELDS | _BOOL_FIELDS
 
 
 class SettingsError(ValueError):
@@ -38,6 +39,10 @@ class AgentletSettings:
     api_base: str | None = None
     temperature: float | None = None
     max_tokens: int | None = None
+    # Tool policy settings
+    allow_write: bool | None = None
+    allow_bash: bool | None = None
+    allow_network: bool | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Return the canonical JSON payload order for persistence."""
@@ -48,6 +53,9 @@ class AgentletSettings:
             "api_base": self.api_base,
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
+            "allow_write": self.allow_write,
+            "allow_bash": self.allow_bash,
+            "allow_network": self.allow_network,
         }
 
 
@@ -95,6 +103,9 @@ def _build_settings_from_dict(data: dict[str, Any], path: Path) -> AgentletSetti
         api_base=_validate_string_field(data, "api_base", path),
         temperature=_validate_float_field(data, "temperature", path),
         max_tokens=_validate_int_field(data, "max_tokens", path),
+        allow_write=_validate_bool_field(data, "allow_write", path),
+        allow_bash=_validate_bool_field(data, "allow_bash", path),
+        allow_network=_validate_bool_field(data, "allow_network", path),
     )
 
 
@@ -205,4 +216,13 @@ def _validate_int_field(payload: dict[str, Any], key: str, path: Path) -> int | 
         return None
     if isinstance(value, bool) or not isinstance(value, int):
         raise SettingsError(f"Settings key `{key}` in {path} must be an integer or null.")
+    return value
+
+
+def _validate_bool_field(payload: dict[str, Any], key: str, path: Path) -> bool | None:
+    value = payload.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, bool):
+        raise SettingsError(f"Settings key `{key}` in {path} must be a boolean or null.")
     return value

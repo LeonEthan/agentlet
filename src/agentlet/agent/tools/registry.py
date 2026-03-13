@@ -44,6 +44,17 @@ class ToolExecutionError(RuntimeError):
     pass
 
 
+def build_tool_result_content(payload: dict[str, Any]) -> str:
+    """Build a consistent JSON text envelope for tool results.
+
+    Built-in tools return JSON text, not free-form prose, so the model sees
+    predictable keys and the CLI can parse or summarize payloads without
+    inventing a second result model.
+    """
+    # Use compact separators to reduce token usage in model context
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+
+
 class ToolRegistry:
     """Register tools and execute them behind one narrow boundary."""
 
