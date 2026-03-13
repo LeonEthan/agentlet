@@ -63,7 +63,7 @@ class WebSearchTool(Tool):
         max_results = max(1, min(max_results, self.runtime.max_search_results))
 
         try:
-            from duckduckgo_search import DDGS
+            from ddgs import DDGS
         except ImportError:
             raise ToolExecutionError(
                 "Web search requires the 'ddgs' package. Install with: pip install ddgs"

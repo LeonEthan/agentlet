@@ -8,7 +8,7 @@ import pytest
 from agentlet.agent.agent_loop import TurnEvent
 from agentlet.agent.context import Message, ToolCall, ToolResult
 from agentlet.agent.providers.registry import DEFAULT_MODEL, ProviderRegistryError
-from agentlet.cli.main import build_parser
+from agentlet.cli.main import _resolve_tool_policy, build_parser
 from agentlet.cli.chat_app import ChatCLIError, run_chat_command, _resolve_chat_mode, _settings_from_args
 from agentlet.cli.commands import CommandError, parse_command, summarize_history
 from agentlet.cli.presenter import ChatPresenter
@@ -157,3 +157,29 @@ def test_settings_from_args_clears_api_credentials_when_provider_overridden() ->
     assert result.model == "claude-3-sonnet"
     assert result.api_key is None  # Cleared, not inherited
     assert result.api_base is None  # Cleared, not inherited
+
+
+def test_resolve_tool_policy_uses_stored_settings_without_deny_flags() -> None:
+    args = make_cli_args(deny_write=False, deny_bash=False, deny_network=False)
+
+    result = _resolve_tool_policy(
+        AgentletSettings(allow_write=False, allow_bash=True, allow_network=False),
+        args,
+    )
+
+    assert result.allow_write is False
+    assert result.allow_bash is True
+    assert result.allow_network is False
+
+
+def test_resolve_tool_policy_deny_flags_override_stored_settings() -> None:
+    args = make_cli_args(deny_write=True, deny_bash=True, deny_network=True)
+
+    result = _resolve_tool_policy(
+        AgentletSettings(allow_write=True, allow_bash=True, allow_network=True),
+        args,
+    )
+
+    assert result.allow_write is False
+    assert result.allow_bash is False
+    assert result.allow_network is False

@@ -116,8 +116,11 @@ def _resolve_tool_policy(stored: AgentletSettings, args: argparse.Namespace) -> 
     """
 
     def _resolve_field(setting_value: bool | None, deny_flag: bool) -> bool:
-        # If setting is explicitly set, use it; otherwise use NOT the deny flag
-        return setting_value if setting_value is not None else not deny_flag
+        if deny_flag:
+            return False
+        if setting_value is not None:
+            return setting_value
+        return True
 
     return ToolPolicy(
         allow_network=_resolve_field(stored.allow_network, args.deny_network),
@@ -160,6 +163,9 @@ def main(argv: list[str] | None = None, *, home_dir: Path | None = None) -> int:
                     api_base=stored_settings.api_base,
                     temperature=args.temperature,
                     max_tokens=args.max_tokens,
+                    allow_write=stored_settings.allow_write,
+                    allow_bash=stored_settings.allow_bash,
+                    allow_network=stored_settings.allow_network,
                 ),
                 settings_path=write_path,
                 force=args.force,

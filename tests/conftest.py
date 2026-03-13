@@ -115,6 +115,9 @@ def make_cli_args(**overrides) -> SimpleNamespace:
         "model": None,
         "temperature": None,
         "max_tokens": None,
+        "deny_write": False,
+        "deny_bash": False,
+        "deny_network": False,
     }
     defaults.update(overrides)
     return SimpleNamespace(**defaults)
