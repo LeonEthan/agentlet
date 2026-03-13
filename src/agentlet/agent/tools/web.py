@@ -2,7 +2,7 @@ from __future__ import annotations
 
 """Web tools: WebSearch and WebFetch."""
 
-import html
+import html as html_lib
 import re
 from typing import Any
 from urllib.parse import urlparse
@@ -230,10 +230,15 @@ class WebFetchTool(Tool):
         except Exception as exc:
             raise ToolExecutionError(f"Failed to fetch {url}: {exc}") from exc
 
-    def _extract_text_fallback(self, html: str) -> str:
+    def _extract_text_fallback(self, html_text: str) -> str:
         """Basic HTML to text fallback when trafilatura is not available."""
         # Remove script and style tags and their content
-        text = re.sub(r"<script[^>]*>.*?</script>", "", html, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(
+            r"<script[^>]*>.*?</script>",
+            "",
+            html_text,
+            flags=re.DOTALL | re.IGNORECASE,
+        )
         text = re.sub(r"<style[^>]*>.*?</style>", "", text, flags=re.DOTALL | re.IGNORECASE)
 
         # Replace common block elements with newlines
@@ -244,7 +249,7 @@ class WebFetchTool(Tool):
         text = re.sub(r"<[^>]+>", "", text)
 
         # Decode common HTML entities
-        text = html.unescape(text)
+        text = html_lib.unescape(text)
 
         # Normalize whitespace
         lines = [line.strip() for line in text.splitlines()]
@@ -252,9 +257,9 @@ class WebFetchTool(Tool):
 
         return text
 
-    def _extract_title(self, html: str) -> str:
+    def _extract_title(self, html_text: str) -> str:
         """Extract title from HTML."""
-        match = re.search(r"<title[^>]*>(.*?)</title>", html, re.IGNORECASE | re.DOTALL)
+        match = re.search(r"<title[^>]*>(.*?)</title>", html_text, re.IGNORECASE | re.DOTALL)
         if match:
-            return html.unescape(match.group(1).strip())
+            return html_lib.unescape(match.group(1).strip())
         return ""
