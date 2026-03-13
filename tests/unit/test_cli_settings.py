@@ -113,6 +113,9 @@ def test_main_init_writes_canonical_settings_file(tmp_path, capsys) -> None:
         "api_base": None,
         "temperature": 0.3,
         "max_tokens": 256,
+        "allow_write": None,
+        "allow_bash": None,
+        "allow_network": None,
     }
 
 
@@ -145,6 +148,9 @@ def test_main_init_force_repairs_invalid_settings_file(tmp_path) -> None:
         "api_base": None,
         "temperature": 0.0,
         "max_tokens": None,
+        "allow_write": None,
+        "allow_bash": None,
+        "allow_network": None,
     }
 
 
@@ -183,6 +189,9 @@ def test_main_init_force_migrates_legacy_settings_filename(tmp_path) -> None:
         "api_base": "http://legacy.example/v1",
         "temperature": 0.2,
         "max_tokens": 64,
+        "allow_write": None,
+        "allow_bash": None,
+        "allow_network": None,
     }
 
 
@@ -217,6 +226,49 @@ def test_main_init_force_preserves_existing_sensitive_settings(tmp_path) -> None
         "api_base": "http://stored.example/v1",
         "temperature": 0.8,
         "max_tokens": 32,
+        "allow_write": None,
+        "allow_bash": None,
+        "allow_network": None,
+    }
+
+
+def test_main_init_force_preserves_existing_tool_policy_settings(tmp_path) -> None:
+    settings_path = default_settings_path(tmp_path)
+    settings_path.parent.mkdir(parents=True)
+    settings_path.write_text(
+        json.dumps(
+            {
+                "provider": "openai",
+                "model": "old-model",
+                "api_key": "stored-key",
+                "api_base": "http://stored.example/v1",
+                "temperature": 0.1,
+                "max_tokens": 32,
+                "allow_write": False,
+                "allow_bash": True,
+                "allow_network": False,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    exit_code = cli_main.main(
+        ["init", "--force", "--model", "new-model"],
+        home_dir=tmp_path,
+    )
+
+    assert exit_code == 0
+    assert json.loads(settings_path.read_text(encoding="utf-8")) == {
+        "provider": "openai",
+        "model": "new-model",
+        "api_key": "stored-key",
+        "api_base": "http://stored.example/v1",
+        "temperature": 0.1,
+        "max_tokens": 32,
+        "allow_write": False,
+        "allow_bash": True,
+        "allow_network": False,
     }
 
 

@@ -9,10 +9,12 @@ description = "A minimal Python agent harness."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "ddgs>=4.0.0",
     "httpx[socks]>=0.28.0",
     "litellm>=1.63.0",
     "prompt_toolkit>=3.0.43",
     "rich>=13.9.0",
+    "trafilatura>=2.0.0",
 ]
 
 [project.optional-dependencies]

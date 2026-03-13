@@ -18,6 +18,8 @@ from agentlet.settings import (
     resolve_settings_defaults,
     write_settings,
 )
+from agentlet.agent.tools.builtins import build_default_registry
+from agentlet.agent.tools.policy import ToolPolicy, ToolRuntimeConfig
 from agentlet.agent.tools.registry import ToolRegistry
 from agentlet.cli.chat_app import ChatCLIError, run_chat_command
 
@@ -77,6 +79,21 @@ def build_parser(defaults: AgentletSettings) -> argparse.ArgumentParser:
         default=defaults.max_tokens,
         help="Optional max_tokens override.",
     )
+    chat.add_argument(
+        "--deny-write",
+        action="store_true",
+        help="Disable Write and Edit tools.",
+    )
+    chat.add_argument(
+        "--deny-bash",
+        action="store_true",
+        help="Disable Bash tool.",
+    )
+    chat.add_argument(
+        "--deny-network",
+        action="store_true",
+        help="Disable WebSearch and WebFetch tools.",
+    )
     return parser
 
 
@@ -89,6 +106,27 @@ def _provider_change_preserves_sensitive_settings(
         return False
     previous_provider = resolve_settings_defaults(stored_settings).provider
     return previous_provider != next_provider
+
+
+def _resolve_tool_policy(stored: AgentletSettings, args: argparse.Namespace) -> ToolPolicy:
+    """Resolve tool policy from stored settings and CLI flags.
+
+    Settings file values take precedence over CLI defaults.
+    CLI flags override both.
+    """
+
+    def _resolve_field(setting_value: bool | None, deny_flag: bool) -> bool:
+        if deny_flag:
+            return False
+        if setting_value is not None:
+            return setting_value
+        return True
+
+    return ToolPolicy(
+        allow_network=_resolve_field(stored.allow_network, args.deny_network),
+        allow_write=_resolve_field(stored.allow_write, args.deny_write),
+        allow_bash=_resolve_field(stored.allow_bash, args.deny_bash),
+    )
 
 
 def main(argv: list[str] | None = None, *, home_dir: Path | None = None) -> int:
@@ -125,6 +163,9 @@ def main(argv: list[str] | None = None, *, home_dir: Path | None = None) -> int:
                     api_base=stored_settings.api_base,
                     temperature=args.temperature,
                     max_tokens=args.max_tokens,
+                    allow_write=stored_settings.allow_write,
+                    allow_bash=stored_settings.allow_bash,
+                    allow_network=stored_settings.allow_network,
                 ),
                 settings_path=write_path,
                 force=args.force,
@@ -140,6 +181,15 @@ def main(argv: list[str] | None = None, *, home_dir: Path | None = None) -> int:
     if args.command != "chat":
         parser.error(f"Unsupported command: {args.command}")
 
+    # Build tool policy from settings + CLI args
+    tool_policy = _resolve_tool_policy(stored_settings, args)
+
+    # Build runtime config from cwd
+    tool_runtime = ToolRuntimeConfig(cwd=Path.cwd())
+
+    # Build the default registry with enabled tools based on policy
+    tool_registry = build_default_registry(tool_policy, tool_runtime)
+
     try:
         return run_chat_command(
             args,
@@ -148,7 +198,7 @@ def main(argv: list[str] | None = None, *, home_dir: Path | None = None) -> int:
             stdout=sys.stdout,
             stderr=sys.stderr,
             provider_registry=ProviderRegistry(),
-            tool_registry=ToolRegistry(),
+            tool_registry=tool_registry,
         )
     except ChatCLIError as exc:
         parser.error(str(exc))

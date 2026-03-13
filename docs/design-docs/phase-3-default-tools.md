@@ -58,7 +58,7 @@ Phase 3 explicitly does not include:
 
 - browser automation
 - desktop control
-- arbitrary access outside the working directory
+- sandboxing shell commands from access outside the working directory
 - patch-application or AST-edit tooling
 - long-running background jobs
 - a full approval UI for every individual tool call
@@ -76,7 +76,7 @@ Recommended decisions:
 - keep `ToolRegistry` as the single execution boundary
 - keep `ToolResult.content` as text but formalize the shape that `Context` stores for built-in tool results
 - require built-in tools to return compact JSON text envelopes so the model sees stable structure
-- scope all local file tools to the current working directory
+- scope local filesystem tools to the current working directory
 - separate search from fetch:
   - `WebSearch` finds candidate URLs
   - `WebFetch` retrieves and extracts readable page content
@@ -304,7 +304,7 @@ This design stays simple, exact-match based, and testable. It is intentionally l
 
 Purpose:
 
-- run terminal commands, scripts, and common git operations inside the workspace
+- run terminal commands, scripts, and common git operations starting from the workspace
 
 Suggested arguments:
 
@@ -315,6 +315,7 @@ Rules:
 
 - disabled unless shell access is enabled
 - execution happens with `cwd` set to the workspace root
+- commands are not sandboxed and may access resources outside `cwd` with the current user's permissions
 - command timeout defaults to the runtime config limit
 - stdout and stderr should be captured separately
 - large outputs should be truncated with explicit byte counts
@@ -350,7 +351,8 @@ Suggested arguments:
 Rules:
 
 - results are always workspace-relative
-- only filesystem paths under `cwd` are returned
+- only filesystem paths whose resolved targets remain under `cwd` are returned
+- symlinks that resolve outside `cwd` are skipped
 - a limit is applied to avoid overwhelming the model
 
 Suggested result fields:
@@ -376,6 +378,8 @@ Rules:
 
 - regex compilation errors should fail fast
 - text files only
+- only files whose resolved targets remain under `cwd` are searched
+- symlinks that resolve outside `cwd` are skipped
 - output should include enough local context to be actionable without dumping entire files
 
 Suggested result fields:
@@ -567,6 +571,7 @@ The default system prompt should be expanded slightly once these tools exist. It
 - use workspace-relative paths
 - prefer `Glob` and `Grep` before broad reads
 - use `WebSearch` for discovery and `WebFetch` for page content
+- treat filesystem tools as workspace-bounded, but treat `Bash` as starting in `cwd` rather than sandboxed to it
 - avoid mutating tools unless needed
 - summarize command and tool results rather than reprinting large blobs
 
