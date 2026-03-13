@@ -8,7 +8,7 @@ Current phase:
 
 - single-process agent loop with tool support
 - interactive TTY chat with streaming output
-- resumable cwd-scoped sessions under `.agentlet/sessions/`
+- resumable cwd-scoped sessions under `~/.agentlet/sessions/` (grouped by working directory hash)
 - independent `Context`
 - `LiteLLM` provider integration
 - user-level `~/.agentlet/setting.json` defaults for local testing
@@ -38,7 +38,7 @@ agentlet init \
   --model gpt-4o-mini
 ```
 
-This writes `~/.agentlet/setting.json` with the canonical JSON shape:
+This writes `~/.agentlet/settings.json` with the canonical JSON shape:
 
 ```json
 {
@@ -115,7 +115,7 @@ Interactive commands:
 
 - SOCKS proxy support is included through `httpx[socks]`.
 - `LiteLLM` may require provider-prefixed model names for some backends.
-- Exported shell variables win over values stored in `~/.agentlet/setting.json`.
+- Exported shell variables win over values stored in `~/.agentlet/settings.json`.
 - Interactive sessions persist only completed turns; cancelled or failed turns are not committed.
 - Session headers persist non-sensitive provider settings so resumed chats keep the same model endpoint and sampling limits.
 - Detailed design notes live in [`docs/design-docs/phase-1-foundation.md`](docs/design-docs/phase-1-foundation.md) and [`docs/design-docs/phase-2-cli-experience.md`](docs/design-docs/phase-2-cli-experience.md).

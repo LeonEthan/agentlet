@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -11,11 +12,31 @@ from agentlet.cli.sessions import (
     SessionNotFoundError,
     SessionStore,
     SessionTurnRecorder,
+    _cwd_hash,
 )
 
 
-def test_session_store_round_trips_completed_turns(tmp_path) -> None:
-    store = SessionStore(tmp_path)
+def _make_store(tmp_path: Path, cwd: Path) -> SessionStore:
+    """Create a SessionStore with tmp_path as the data_dir for testing."""
+    return SessionStore(cwd, data_dir=tmp_path)
+
+
+def _session_path(tmp_path: Path, cwd: Path, session_id: str) -> Path:
+    """Return the expected session file path for testing."""
+    return tmp_path / "sessions" / _cwd_hash(cwd) / f"{session_id}.jsonl"
+
+
+@pytest.fixture
+def project_store(tmp_path: Path) -> tuple[Path, SessionStore]:
+    """Create a project directory and SessionStore for testing."""
+    cwd = tmp_path / "project"
+    cwd.mkdir()
+    store = _make_store(tmp_path, cwd)
+    return cwd, store
+
+
+def test_session_store_round_trips_completed_turns(project_store: tuple[Path, SessionStore]) -> None:
+    cwd, store = project_store
     info = store.start_session(
         provider_name="openai",
         model="gpt-4o-mini",
@@ -89,8 +110,10 @@ def test_session_store_round_trips_completed_turns(tmp_path) -> None:
     assert loaded.context.history[-1].content == "done"
 
 
-def test_session_store_updates_latest_only_after_first_completed_turn(tmp_path) -> None:
-    store = SessionStore(tmp_path)
+def test_session_store_updates_latest_only_after_first_completed_turn(
+    project_store: tuple[Path, SessionStore],
+) -> None:
+    _, store = project_store
     info = store.start_session(
         provider_name="openai",
         model="gpt-4o-mini",
@@ -126,10 +149,13 @@ def test_session_store_updates_latest_only_after_first_completed_turn(tmp_path) 
     assert store.load_latest_session_id() == info.session_id
 
 
-def test_session_store_reports_malformed_json_with_line_number(tmp_path) -> None:
-    store = SessionStore(tmp_path)
+def test_session_store_reports_malformed_json_with_line_number(
+    tmp_path: Path,
+    project_store: tuple[Path, SessionStore],
+) -> None:
+    cwd, store = project_store
     session_id = "bad-session"
-    transcript_path = tmp_path / ".agentlet" / "sessions" / f"{session_id}.jsonl"
+    transcript_path = _session_path(tmp_path, cwd, session_id)
     transcript_path.parent.mkdir(parents=True, exist_ok=True)
     transcript_path.write_text(
         json.dumps(
@@ -139,7 +165,7 @@ def test_session_store_reports_malformed_json_with_line_number(tmp_path) -> None
                 "timestamp": "2026-03-12T00:00:00+00:00",
                 "type": "session_started",
                 "payload": {
-                    "cwd": str(tmp_path),
+                    "cwd": str(cwd),
                     "provider_name": "openai",
                     "model": "gpt-4o-mini",
                     "system_prompt": "system",
@@ -155,10 +181,13 @@ def test_session_store_reports_malformed_json_with_line_number(tmp_path) -> None
         store.load_session(session_id)
 
 
-def test_session_store_reports_missing_system_prompt_in_header(tmp_path) -> None:
-    store = SessionStore(tmp_path)
+def test_session_store_reports_missing_system_prompt_in_header(
+    tmp_path: Path,
+    project_store: tuple[Path, SessionStore],
+) -> None:
+    cwd, store = project_store
     session_id = "missing-prompt"
-    transcript_path = tmp_path / ".agentlet" / "sessions" / f"{session_id}.jsonl"
+    transcript_path = _session_path(tmp_path, cwd, session_id)
     transcript_path.parent.mkdir(parents=True, exist_ok=True)
     transcript_path.write_text(
         json.dumps(
@@ -168,7 +197,7 @@ def test_session_store_reports_missing_system_prompt_in_header(tmp_path) -> None
                 "timestamp": "2026-03-12T00:00:00+00:00",
                 "type": "session_started",
                 "payload": {
-                    "cwd": str(tmp_path),
+                    "cwd": str(cwd),
                     "provider_name": "openai",
                     "model": "gpt-4o-mini",
                 },
@@ -182,10 +211,13 @@ def test_session_store_reports_missing_system_prompt_in_header(tmp_path) -> None
         store.load_session(session_id)
 
 
-def test_session_store_reports_non_list_tool_calls(tmp_path) -> None:
-    store = SessionStore(tmp_path)
+def test_session_store_reports_non_list_tool_calls(
+    tmp_path: Path,
+    project_store: tuple[Path, SessionStore],
+) -> None:
+    cwd, store = project_store
     session_id = "bad-tool-calls"
-    transcript_path = tmp_path / ".agentlet" / "sessions" / f"{session_id}.jsonl"
+    transcript_path = _session_path(tmp_path, cwd, session_id)
     transcript_path.parent.mkdir(parents=True, exist_ok=True)
     transcript_path.write_text(
         json.dumps(
@@ -195,7 +227,7 @@ def test_session_store_reports_non_list_tool_calls(tmp_path) -> None:
                 "timestamp": "2026-03-12T00:00:00+00:00",
                 "type": "session_started",
                 "payload": {
-                    "cwd": str(tmp_path),
+                    "cwd": str(cwd),
                     "provider_name": "openai",
                     "model": "gpt-4o-mini",
                     "system_prompt": "system",
@@ -233,10 +265,13 @@ def test_session_store_reports_non_list_tool_calls(tmp_path) -> None:
         store.load_session(session_id)
 
 
-def test_session_store_rejects_incomplete_final_turn(tmp_path) -> None:
-    store = SessionStore(tmp_path)
+def test_session_store_rejects_incomplete_final_turn(
+    tmp_path: Path,
+    project_store: tuple[Path, SessionStore],
+) -> None:
+    cwd, store = project_store
     session_id = "incomplete-turn"
-    transcript_path = tmp_path / ".agentlet" / "sessions" / f"{session_id}.jsonl"
+    transcript_path = _session_path(tmp_path, cwd, session_id)
     transcript_path.parent.mkdir(parents=True, exist_ok=True)
     transcript_path.write_text(
         json.dumps(
@@ -246,7 +281,7 @@ def test_session_store_rejects_incomplete_final_turn(tmp_path) -> None:
                 "timestamp": "2026-03-12T00:00:00+00:00",
                 "type": "session_started",
                 "payload": {
-                    "cwd": str(tmp_path),
+                    "cwd": str(cwd),
                     "provider_name": "openai",
                     "model": "gpt-4o-mini",
                     "system_prompt": "system",

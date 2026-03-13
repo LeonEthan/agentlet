@@ -2,6 +2,7 @@ from __future__ import annotations
 
 """Interactive session persistence and resume helpers."""
 
+import hashlib
 import json
 import secrets
 from dataclasses import dataclass
@@ -17,6 +18,16 @@ AGENTLET_DIR = ".agentlet"
 SESSIONS_DIR = "sessions"
 LATEST_FILE = "latest"
 HISTORY_FILE = "history"
+
+
+def get_data_dir() -> Path:
+    """Return the global agentlet data directory (~/.agentlet)."""
+    return Path.home() / AGENTLET_DIR
+
+
+def _cwd_hash(cwd: Path) -> str:
+    """Generate a short hash for the working directory path."""
+    return hashlib.md5(str(cwd.resolve()).encode()).hexdigest()[:16]
 
 # Record type constants
 RECORD_TYPE_SESSION_STARTED = "session_started"
@@ -161,12 +172,20 @@ class SessionTurnRecorder:
 class SessionStore:
     """Manage session transcript files scoped to one working directory."""
 
-    def __init__(self, cwd: Path) -> None:
+    def __init__(self, cwd: Path, data_dir: Path | None = None) -> None:
+        """
+        Args:
+            cwd: The working directory this session store is scoped to.
+            data_dir: Optional override for the base data directory.
+                     Defaults to ~/.agentlet
+        """
         self.cwd = cwd
-        self.base_dir = cwd / AGENTLET_DIR
-        self.sessions_dir = self.base_dir / SESSIONS_DIR
+        self.data_dir = data_dir or get_data_dir()
+        # Sessions are grouped by cwd hash: ~/.agentlet/sessions/{hash}/
+        self.sessions_dir = self.data_dir / SESSIONS_DIR / _cwd_hash(cwd)
         self.latest_path = self.sessions_dir / LATEST_FILE
-        self.history_path = self.base_dir / HISTORY_FILE
+        # History is global (not scoped to cwd)
+        self.history_path = self.data_dir / HISTORY_FILE
 
     def start_session(
         self,

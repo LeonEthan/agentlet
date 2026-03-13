@@ -194,7 +194,12 @@ The UI should optimize for long scrollback readability, not visual density.
 
 ### 7.1 Session scope
 
-Sessions should be scoped to the current working directory. This matches the local-harness usage model and keeps resume behavior predictable.
+Sessions are scoped to the current working directory using a hash-based grouping strategy. Each working directory gets its own isolated session storage under `~/.agentlet/sessions/{cwd_hash}/`. This matches the local-harness usage model while keeping session data centralized in the user's home directory.
+
+The `cwd_hash` is the first 16 characters of the MD5 hash of the resolved working directory path. This provides:
+- Predictable resume behavior within each working directory
+- Isolation between different projects
+- A flat, filesystem-safe directory structure
 
 ### 7.2 Persistence format
 
@@ -203,11 +208,15 @@ Phase 2 should use an append-friendly filesystem format, not a database.
 Recommended layout:
 
 ```text
-.agentlet/
-└── sessions/
-    ├── latest
-    └── <session-id>.jsonl
+~/.agentlet/
+├── sessions/
+│   └── {cwd_hash}/
+│       ├── latest
+│       └── <session-id>.jsonl
+└── history
 ```
+
+Sessions are grouped by working directory hash (`cwd_hash`), which is the first 16 characters of the MD5 hash of the resolved working directory path. This provides isolation between different projects while keeping all session data centralized in `~/.agentlet/`.
 
 Why JSONL:
 
@@ -250,7 +259,7 @@ Resume should rebuild a `Context` from the stored normalized transcript.
 
 Rules:
 
-- `--continue` loads the session pointed to by `.agentlet/sessions/latest`
+- `--continue` loads the session pointed to by `~/.agentlet/sessions/{cwd_hash}/latest` for the current working directory
 - `--session <id>` loads that specific transcript
 - `--new-session` ignores any previous latest pointer
 - every completed interactive turn appends to the session log and updates `latest`
@@ -261,7 +270,7 @@ Concurrency rules:
 
 - each interactive process creates and writes only its own `<session-id>.jsonl` file
 - no two processes should append to the same session file concurrently
-- `.agentlet/sessions/latest` is best-effort metadata; last successful writer wins
+- `~/.agentlet/sessions/{cwd_hash}/latest` is best-effort metadata; last successful writer wins
 - writes to `latest` should be atomic via write-to-temp then rename
 
 Phase 2 does not need cross-process locking beyond per-session file ownership, because resume targets a specific immutable session id and concurrent sessions do not share a transcript file.
