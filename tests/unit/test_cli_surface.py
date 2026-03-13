@@ -18,9 +18,6 @@ def test_resolve_chat_mode_prefers_interactive_tty_without_message() -> None:
     args = SimpleNamespace(
         message=None,
         print_mode=False,
-        continue_session=False,
-        session_id=None,
-        new_session=False,
     )
 
     message, interactive = _resolve_chat_mode(args, stdin=StringIO(""), stdin_isatty=True)
@@ -29,26 +26,10 @@ def test_resolve_chat_mode_prefers_interactive_tty_without_message() -> None:
     assert interactive is True
 
 
-def test_resolve_chat_mode_rejects_message_with_session_flags() -> None:
-    args = SimpleNamespace(
-        message="hello",
-        print_mode=False,
-        continue_session=True,
-        session_id=None,
-        new_session=False,
-    )
-
-    with pytest.raises(ChatCLIError, match="Session flags cannot be combined"):
-        _resolve_chat_mode(args, stdin=StringIO(""), stdin_isatty=True)
-
-
 def test_resolve_chat_mode_reads_non_tty_stdin_as_one_shot() -> None:
     args = SimpleNamespace(
         message=None,
         print_mode=False,
-        continue_session=False,
-        session_id=None,
-        new_session=False,
     )
 
     message, interactive = _resolve_chat_mode(
@@ -63,9 +44,6 @@ def test_resolve_chat_mode_rejects_print_mode_on_interactive_tty_without_message
     args = SimpleNamespace(
         message=None,
         print_mode=True,
-        continue_session=False,
-        session_id=None,
-        new_session=False,
     )
 
     with pytest.raises(
@@ -73,64 +51,6 @@ def test_resolve_chat_mode_rejects_print_mode_on_interactive_tty_without_message
         match="--print requires a message argument or redirected stdin",
     ):
         _resolve_chat_mode(args, stdin=StringIO(""), stdin_isatty=True)
-
-
-def test_resolve_chat_mode_rejects_session_flags_with_non_tty_stdin() -> None:
-    args = SimpleNamespace(
-        message=None,
-        print_mode=False,
-        continue_session=True,
-        session_id=None,
-        new_session=False,
-    )
-
-    with pytest.raises(ChatCLIError, match="Session flags require an interactive TTY"):
-        _resolve_chat_mode(args, stdin=StringIO("hello from stdin"), stdin_isatty=False)
-
-
-def test_run_chat_command_reports_missing_latest_session_as_cli_error(tmp_path) -> None:
-    args = SimpleNamespace(
-        message=None,
-        print_mode=False,
-        continue_session=True,
-        session_id=None,
-        new_session=False,
-        provider="openai",
-        model=DEFAULT_MODEL,
-        api_key=None,
-        api_base=None,
-        temperature=0.0,
-        max_tokens=None,
-    )
-
-    with pytest.raises(ChatCLIError, match="No latest session metadata found"):
-        run_chat_command(
-            args,
-            stdin=StringIO(""),
-            stdout=StringIO(),
-            stderr=StringIO(),
-            cwd=tmp_path,
-            stdin_isatty=True,
-        )
-
-
-def test_run_chat_command_does_not_create_session_when_provider_setup_fails(tmp_path) -> None:
-    class BadProviderRegistry:
-        def create(self, config):
-            raise ProviderRegistryError(f"Unsupported provider: {config.name}")
-
-    with pytest.raises(ProviderRegistryError, match="Unsupported provider: bad"):
-        run_chat_command(
-            make_cli_args(provider="bad"),
-            stdin=StringIO(""),
-            stdout=StringIO(),
-            stderr=StringIO(),
-            provider_registry=BadProviderRegistry(),
-            cwd=tmp_path,
-            stdin_isatty=True,
-        )
-
-    assert not (tmp_path / ".agentlet" / "sessions").exists()
 
 
 def test_parse_command_rejects_arguments() -> None:

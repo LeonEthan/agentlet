@@ -8,7 +8,7 @@ from agentlet.agent.providers.registry import ProviderConfig
 from agentlet.cli import main as cli_main
 from agentlet.cli.chat_app import run_chat_command
 from agentlet.cli.sessions import SessionStore
-from agentlet.settings import default_settings_path
+from agentlet.settings import AgentletSettings, default_settings_path
 from conftest import FakeProvider, FakeProviderRegistry, make_cli_args
 
 
@@ -75,14 +75,17 @@ def test_main_chat_loads_defaults_from_user_settings(tmp_path, monkeypatch, caps
     assert config.model == "settings-model"
 
 
-def test_run_chat_command_interactive_resume_latest(tmp_path) -> None:
+def test_run_chat_command_interactive_new_session(tmp_path) -> None:
+    """Test interactive mode creates a new session each time (no --resume support)."""
     from conftest import build_capture_console
 
     provider = FakeProvider()
     captured_configs: list[ProviderConfig] = []
     provider_registry = FakeProviderRegistry(capture_config=captured_configs, provider=provider)
-    args = make_cli_args(
+    settings = AgentletSettings(
+        provider="openai",
         model="model-a",
+        api_key="test-key",
         api_base="http://localhost:4000/v1",
         temperature=0.7,
         max_tokens=64,
@@ -91,7 +94,8 @@ def test_run_chat_command_interactive_resume_latest(tmp_path) -> None:
 
     console_one, output_one = build_capture_console()
     exit_code_one = run_chat_command(
-        args,
+        make_cli_args(),
+        settings=settings,
         stdin=StringIO(""),
         stdout=StringIO(),
         stderr=StringIO(),
@@ -104,15 +108,11 @@ def test_run_chat_command_interactive_resume_latest(tmp_path) -> None:
 
     latest_session_id = session_store.load_latest_session_id()
 
+    # Second run creates a new session (no --continue support)
     console_two, output_two = build_capture_console()
     exit_code_two = run_chat_command(
-        make_cli_args(
-            continue_session=True,
-            model="model-b",
-            api_base="http://different-host/v1",
-            temperature=0.1,
-            max_tokens=12,
-        ),
+        make_cli_args(),
+        settings=settings,
         stdin=StringIO(""),
         stdout=StringIO(),
         stderr=StringIO(),
@@ -130,7 +130,8 @@ def test_run_chat_command_interactive_resume_latest(tmp_path) -> None:
     assert exit_code_two == 0
     assert "echo: first turn" in output_one.getvalue()
     assert "echo: second turn" in output_two.getvalue()
-    assert user_messages == ["first turn", "second turn"]
+    # First session only has first turn (no resume)
+    assert user_messages == ["first turn"]
     assert [config.model for config in captured_configs] == ["model-a", "model-a"]
     assert [config.api_base for config in captured_configs] == [
         "http://localhost:4000/v1",

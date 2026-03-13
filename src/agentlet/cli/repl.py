@@ -27,8 +27,6 @@ def run_repl(
     presenter: ChatPresenter,
     session_store: SessionStore,
     cwd: Path,
-    continue_session: bool,
-    session_id: str | None,
     loaded_session: LoadedSession,
 ) -> int:
     """Run the interactive chat loop until the user exits."""
@@ -40,7 +38,7 @@ def run_repl(
         provider_name=current_session.provider_name,
         model=current_session.model,
         cwd=cwd,
-        resumed=bool(session_id or continue_session),
+        resumed=False,
     )
 
     last_idle_interrupt = 0.0

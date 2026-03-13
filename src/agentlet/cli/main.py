@@ -59,57 +59,11 @@ def build_parser(defaults: AgentletSettings) -> argparse.ArgumentParser:
 
     chat = subparsers.add_parser("chat", help="Run agentlet chat in one-shot or interactive mode.")
     chat.add_argument("message", nargs="?", help="User message. Reads from stdin when omitted.")
-    mode_group = chat.add_mutually_exclusive_group()
-    mode_group.add_argument(
-        "--continue",
-        dest="continue_session",
-        action="store_true",
-        help="Resume the latest interactive session in the current working directory.",
-    )
-    mode_group.add_argument(
-        "--session",
-        dest="session_id",
-        help="Resume a specific interactive session by id.",
-    )
-    mode_group.add_argument(
-        "--new-session",
-        dest="new_session",
-        action="store_true",
-        help="Force a fresh interactive session.",
-    )
     chat.add_argument(
         "--print",
         dest="print_mode",
         action="store_true",
         help="Force one-shot print mode even when stdin is a TTY.",
-    )
-    chat.add_argument("--provider", default=defaults.provider, help="Provider name.")
-    chat.add_argument(
-        "--model",
-        default=defaults.model,
-        help="Model name.",
-    )
-    chat.add_argument(
-        "--api-key",
-        default=defaults.api_key,
-        help="Provider API key.",
-    )
-    chat.add_argument(
-        "--api-base",
-        default=defaults.api_base,
-        help="Optional OpenAI-compatible base URL.",
-    )
-    chat.add_argument(
-        "--temperature",
-        type=float,
-        default=defaults.temperature,
-        help="Sampling temperature.",
-    )
-    chat.add_argument(
-        "--max-tokens",
-        type=int,
-        default=defaults.max_tokens,
-        help="Optional max_tokens override.",
     )
     return parser
 
@@ -126,7 +80,8 @@ def main(argv: list[str] | None = None, *, home_dir: Path | None = None) -> int:
         stored_settings = AgentletSettings()
         settings_error = exc
 
-    parser = build_parser(resolve_settings_defaults(stored_settings))
+    effective_settings = resolve_settings_defaults(stored_settings)
+    parser = build_parser(effective_settings)
     args = parser.parse_args(raw_argv)
 
     if args.command == "init":
@@ -157,6 +112,7 @@ def main(argv: list[str] | None = None, *, home_dir: Path | None = None) -> int:
     try:
         return run_chat_command(
             args,
+            settings=effective_settings,
             stdin=sys.stdin,
             stdout=sys.stdout,
             stderr=sys.stderr,

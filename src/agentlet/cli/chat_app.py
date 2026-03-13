@@ -4,19 +4,26 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import Any, TextIO
+from typing import TextIO
 
 from rich.console import Console
 
 from agentlet.agent.agent_loop import AgentLoop, AgentTurnResult
 from agentlet.agent.context import Context
 from agentlet.agent.prompts.system_prompt import build_system_prompt
-from agentlet.agent.providers.registry import ProviderConfig, ProviderRegistry
+from agentlet.agent.providers.registry import (
+    DEFAULT_MODEL,
+    DEFAULT_PROVIDER,
+    DEFAULT_TEMPERATURE,
+    ProviderConfig,
+    ProviderRegistry,
+)
 from agentlet.agent.tools.registry import ToolRegistry
 from agentlet.cli.presenter import ChatPresenter
-from agentlet.cli.prompt import build_prompt, create_prompt_session
+from agentlet.cli.prompt import create_prompt_session
 from agentlet.cli.repl import run_repl
-from agentlet.cli.sessions import LoadedSession, SessionError, SessionStore, load_session_for_resume
+from agentlet.cli.sessions import LoadedSession, SessionStore
+from agentlet.settings import AgentletSettings
 
 
 class ChatCLIError(ValueError):
@@ -24,26 +31,16 @@ class ChatCLIError(ValueError):
 
 
 async def run_chat(
-    *,
     message: str,
-    provider_name: str,
-    model: str,
-    api_key: str | None,
-    api_base: str | None,
-    temperature: float,
-    max_tokens: int | None,
+    settings: AgentletSettings,
+    *,
     provider_registry: ProviderRegistry | None = None,
     tool_registry: ToolRegistry | None = None,
     system_prompt: str | None = None,
 ) -> AgentTurnResult:
     """Wire one-shot CLI arguments into runtime dependencies and execute one turn."""
     loop = _create_agent_loop(
-        provider_name=provider_name,
-        model=model,
-        api_key=api_key,
-        api_base=api_base,
-        temperature=temperature,
-        max_tokens=max_tokens,
+        settings=settings,
         provider_registry=provider_registry,
         tool_registry=tool_registry,
         system_prompt=system_prompt,
@@ -52,29 +49,17 @@ async def run_chat(
 
 
 def _create_agent_loop(
+    settings: AgentletSettings,
     *,
-    provider_name: str,
-    model: str,
-    api_key: str | None,
-    api_base: str | None,
-    temperature: float,
-    max_tokens: int | None,
     provider_registry: ProviderRegistry | None = None,
     tool_registry: ToolRegistry | None = None,
     system_prompt: str | None = None,
+    _config: ProviderConfig | None = None,
 ) -> AgentLoop:
     """Build one configured runtime loop for the current CLI invocation."""
     registry = provider_registry or ProviderRegistry()
-    provider = registry.create(
-        ProviderConfig(
-            name=provider_name,
-            model=model,
-            api_key=api_key,
-            api_base=api_base,
-            temperature=temperature,
-            max_tokens=max_tokens,
-        )
-    )
+    config = _config if _config is not None else _create_provider_config(settings)
+    provider = registry.create(config)
     return AgentLoop(
         provider=provider,
         tool_registry=tool_registry or ToolRegistry(),
@@ -82,8 +67,23 @@ def _create_agent_loop(
     )
 
 
+def _create_provider_config(settings: AgentletSettings) -> ProviderConfig:
+    """Create a ProviderConfig from settings with defaults applied."""
+    return ProviderConfig(
+        name=settings.provider or DEFAULT_PROVIDER,
+        model=settings.model or DEFAULT_MODEL,
+        api_key=settings.api_key,
+        api_base=settings.api_base,
+        temperature=settings.temperature
+        if settings.temperature is not None
+        else DEFAULT_TEMPERATURE,
+        max_tokens=settings.max_tokens,
+    )
+
+
 def run_chat_command(
     args,
+    settings: AgentletSettings,
     *,
     stdin: TextIO,
     stdout: TextIO,
@@ -98,18 +98,12 @@ def run_chat_command(
     """Execute the requested chat mode and return the process exit code."""
     message, interactive = _resolve_chat_mode(args, stdin=stdin, stdin_isatty=stdin_isatty)
     working_dir = cwd or Path.cwd()
-    session_store = SessionStore(working_dir)
 
     if not interactive:
         result = asyncio.run(
             run_chat(
                 message=message or "",
-                provider_name=args.provider,
-                model=args.model,
-                api_key=args.api_key,
-                api_base=args.api_base,
-                temperature=args.temperature,
-                max_tokens=args.max_tokens,
+                settings=settings,
                 provider_registry=provider_registry,
                 tool_registry=tool_registry,
             )
@@ -117,54 +111,30 @@ def run_chat_command(
         print(result.output, file=stdout)
         return 0
 
-    try:
-        loaded_session = load_session_for_resume(
-            session_store,
-            continue_session=args.continue_session,
-            session_id=args.session_id,
-        )
-    except SessionError as exc:
-        raise ChatCLIError(str(exc)) from exc
-
-    if loaded_session is None:
-        system_prompt = build_system_prompt()
-        loop = _create_agent_loop(
-            provider_name=args.provider,
-            model=args.model,
-            api_key=args.api_key,
-            api_base=args.api_base,
-            temperature=args.temperature,
-            max_tokens=args.max_tokens,
-            provider_registry=provider_registry,
-            tool_registry=tool_registry,
-            system_prompt=system_prompt,
-        )
-        prompt = prompt_session or create_prompt_session(session_store.history_path)
-        info = session_store.start_session(
-            provider_name=args.provider,
-            model=args.model,
-            api_base=args.api_base,
-            temperature=args.temperature,
-            max_tokens=args.max_tokens,
-            system_prompt=loop.system_prompt,
-        )
-        loaded_session = LoadedSession(
-            info=info,
-            context=Context(system_prompt=loop.system_prompt),
-        )
-    else:
-        loop = _create_agent_loop(
-            provider_name=_resolve_from_session(args, loaded_session, "provider_name"),
-            model=_resolve_from_session(args, loaded_session, "model"),
-            api_key=args.api_key,
-            api_base=_resolve_from_session(args, loaded_session, "api_base"),
-            temperature=_resolve_from_session(args, loaded_session, "temperature"),
-            max_tokens=_resolve_from_session(args, loaded_session, "max_tokens"),
-            provider_registry=provider_registry,
-            tool_registry=tool_registry,
-            system_prompt=loaded_session.context.system_prompt,
-        )
-        prompt = prompt_session or create_prompt_session(session_store.history_path)
+    # Interactive mode - always start fresh session (no --session support)
+    session_store = SessionStore(working_dir)
+    system_prompt = build_system_prompt()
+    config = _create_provider_config(settings)
+    loop = _create_agent_loop(
+        settings=settings,
+        provider_registry=provider_registry,
+        tool_registry=tool_registry,
+        system_prompt=system_prompt,
+        _config=config,
+    )
+    prompt = prompt_session or create_prompt_session(session_store.history_path)
+    info = session_store.start_session(
+        provider_name=config.name,
+        model=config.model,
+        api_base=config.api_base,
+        temperature=config.temperature,
+        max_tokens=config.max_tokens,
+        system_prompt=loop.system_prompt,
+    )
+    loaded_session = LoadedSession(
+        info=info,
+        context=Context(system_prompt=loop.system_prompt),
+    )
 
     presenter = ChatPresenter(console or Console(file=stdout, stderr=False))
     return run_repl(
@@ -173,8 +143,6 @@ def run_chat_command(
         presenter=presenter,
         session_store=session_store,
         cwd=working_dir,
-        continue_session=args.continue_session,
-        session_id=args.session_id,
         loaded_session=loaded_session,
     )
 
@@ -187,15 +155,11 @@ def _read_and_validate_message(source: TextIO) -> str:
     return message
 
 
-def _resolve_chat_mode(args, *, stdin: TextIO, stdin_isatty: bool | None = None) -> tuple[str | None, bool]:
+def _resolve_chat_mode(
+    args, *, stdin: TextIO, stdin_isatty: bool | None = None
+) -> tuple[str | None, bool]:
     """Resolve CLI arguments and stdin shape into (message, interactive) tuple."""
     is_tty = stdin.isatty() if stdin_isatty is None else stdin_isatty
-    has_resume_flags = bool(args.continue_session or args.session_id or args.new_session)
-
-    if args.message is not None and has_resume_flags:
-        raise ChatCLIError("Session flags cannot be combined with a one-shot message.")
-    if args.print_mode and has_resume_flags:
-        raise ChatCLIError("Session flags cannot be combined with --print.")
 
     if args.message is not None:
         message = args.message.strip()
@@ -210,15 +174,7 @@ def _resolve_chat_mode(args, *, stdin: TextIO, stdin_isatty: bool | None = None)
             )
         return _read_and_validate_message(stdin), False
 
-    if has_resume_flags and not is_tty:
-        raise ChatCLIError("Session flags require an interactive TTY.")
-
     if not is_tty:
         return _read_and_validate_message(stdin), False
 
     return None, True
-
-
-def _resolve_from_session(args, loaded_session: LoadedSession, attr: str) -> Any:
-    """Resolve a configuration value from session info or CLI args."""
-    return getattr(loaded_session.info, attr) if loaded_session.info else getattr(args, attr)

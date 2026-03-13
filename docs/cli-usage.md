@@ -205,15 +205,6 @@ agentlet chat [options] [message]
 | Option | Description |
 |--------|-------------|
 | `--print` | Force one-shot output mode |
-| `--continue` | Resume latest session in current directory |
-| `--session ID` | Resume specific session |
-| `--new-session` | Force new interactive session |
-| `--provider` | Override provider |
-| `--model` | Override model |
-| `--api-key` | Override API key |
-| `--api-base` | Override base URL |
-| `--temperature` | Override temperature |
-| `--max-tokens` | Override max tokens |
 
 ---
 
@@ -265,18 +256,6 @@ agentlet chat
 
 ```bash
 agentlet chat --continue
-```
-
-**Resume specific session:**
-
-```bash
-agentlet chat --session 20260312T120000000000Z-deadbeef
-```
-
-**Force fresh session:**
-
-```bash
-agentlet chat --continue --new-session  # Ignore --continue
 ```
 
 #### Interactive Commands
@@ -335,13 +314,6 @@ ls ~/.agentlet/sessions/$cwd_hash/
 # View latest session ID
 cat ~/.agentlet/sessions/$cwd_hash/latest
 ```
-
-**Session Resume Rules:**
-
-- `--continue`: Loads session from `latest` pointer in current directory
-- `--session ID`: Loads specific session (works from any directory)
-- `--new-session`: Forces new session, ignores resume flags
-- Session settings (model, temperature, etc.) are preserved on resume
 
 ---
 
@@ -403,21 +375,6 @@ agentlet chat --provider anthropic --model claude-3-5-sonnet "Analyze this..."
 agentlet chat --api-base http://localhost:11434/v1 --model llama2 "Hello"
 ```
 
-### Multi-turn with Session
-
-```bash
-# Start session
-agentlet chat
-# User: Design a database schema for a blog
-
-# Later, continue and add features
-agentlet chat --continue
-# User: Add user authentication tables
-
-# Continue iterating
-agentlet chat --continue
-# User: Add comment moderation
-```
 
 ---
 
@@ -441,16 +398,6 @@ agentlet chat --api-key sk-... "Test"
 
 # Check environment variables
 env | grep -i api_key
-```
-
-### Session Not Resuming
-
-```bash
-# Check if session exists
-cat ~/.agentlet/sessions/*/latest
-
-# List all sessions
-find ~/.agentlet/sessions -name "*.jsonl"
 ```
 
 ### Connection Issues

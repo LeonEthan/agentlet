@@ -169,15 +169,6 @@ Start an interactive session with full streaming output:
 ```bash
 # New session
 agentlet chat
-
-# Resume latest session in current directory
-agentlet chat --continue
-
-# Resume specific session by ID
-agentlet chat --session 20260312T120000000000Z-deadbeef
-
-# Force new session (ignore --continue)
-agentlet chat --new-session
 ```
 
 #### Interactive Slash Commands
