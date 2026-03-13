@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import Any
+from typing import Protocol
 from typing import TextIO
+from typing import TypedDict
 
 from rich.console import Console
 
@@ -29,6 +30,24 @@ from agentlet.settings import AgentletSettings
 
 class ChatCLIError(ValueError):
     """Raised when CLI arguments resolve to an invalid chat mode."""
+
+
+class ChatSettingsArgs(Protocol):
+    """Minimal CLI argument shape needed to build effective chat settings."""
+
+    provider: str | None
+    model: str | None
+    temperature: float | None
+    max_tokens: int | None
+
+
+class ChatSettingsOverrides(TypedDict):
+    """Normalized setting overrides extracted from CLI args."""
+
+    provider: str | None
+    model: str | None
+    temperature: float | None
+    max_tokens: int | None
 
 
 async def run_chat(
@@ -148,28 +167,39 @@ def run_chat_command(
     )
 
 
-def _settings_from_args(args: Any, *, fallback: AgentletSettings) -> AgentletSettings:
+def _settings_from_args(
+    args: ChatSettingsArgs, *, fallback: AgentletSettings
+) -> AgentletSettings:
     """Build effective chat settings from parsed CLI arguments.
 
     When provider is explicitly overridden via CLI, api_key and api_base are NOT
     inherited from stored settings because they are typically provider-specific.
     """
-    # Get provider first to detect override and avoid double getattr
-    provider_from_cli = getattr(args, "provider", None)
+    overrides: ChatSettingsOverrides = {
+        "provider": args.provider,
+        "model": args.model,
+        "temperature": args.temperature,
+        "max_tokens": args.max_tokens,
+    }
+    provider_from_cli = overrides["provider"]
     provider_overridden = provider_from_cli is not None and provider_from_cli != fallback.provider
-
-    def _value(name: str) -> Any:
-        value = getattr(args, name, None)
-        return getattr(fallback, name) if value is None else value
 
     return AgentletSettings(
         provider=provider_from_cli if provider_from_cli is not None else fallback.provider,
-        model=_value("model"),
+        model=overrides["model"] if overrides["model"] is not None else fallback.model,
         # Don't inherit stale api_key/api_base when switching providers
         api_key=None if provider_overridden else fallback.api_key,
         api_base=None if provider_overridden else fallback.api_base,
-        temperature=_value("temperature"),
-        max_tokens=_value("max_tokens"),
+        temperature=(
+            overrides["temperature"]
+            if overrides["temperature"] is not None
+            else fallback.temperature
+        ),
+        max_tokens=(
+            overrides["max_tokens"]
+            if overrides["max_tokens"] is not None
+            else fallback.max_tokens
+        ),
     )
 
 

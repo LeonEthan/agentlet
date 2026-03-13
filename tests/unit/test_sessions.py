@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import logging
 from pathlib import Path
 
 import pytest
@@ -442,3 +444,67 @@ def test_session_store_loads_session_id_from_any_bucket(tmp_path: Path) -> None:
 
     assert user_messages == ["first", "second"]
     assert store_one.load_latest_session_id() == info.session_id
+
+
+def test_cwd_hash_uses_sha256_of_resolved_path(tmp_path: Path) -> None:
+    cwd = tmp_path / "project"
+    cwd.mkdir()
+
+    expected = hashlib.sha256(str(cwd.resolve()).encode("utf-8")).hexdigest()[:16]
+
+    assert _cwd_hash(cwd) == expected
+
+
+def test_session_store_warns_when_multiple_buckets_match_session_id(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    data_dir = tmp_path / "home-data"
+    sessions_root = data_dir / "sessions"
+    first_match = sessions_root / "aaaa1111"
+    second_match = sessions_root / "bbbb2222"
+    session_id = "shared-session"
+
+    first_match.mkdir(parents=True)
+    second_match.mkdir(parents=True)
+    (first_match / f"{session_id}.jsonl").write_text("first\n", encoding="utf-8")
+    (second_match / f"{session_id}.jsonl").write_text("second\n", encoding="utf-8")
+
+    store = SessionStore(tmp_path / "project", data_dir=data_dir)
+
+    with caplog.at_level(logging.WARNING):
+        resolved = store._resolve_session_path(session_id)
+
+    assert resolved == first_match / f"{session_id}.jsonl"
+    assert f"Multiple session transcripts found for {session_id}" in caplog.text
+
+
+def test_session_store_legacy_migration_does_not_overwrite_racing_writer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    data_dir = tmp_path / "home-data"
+    cwd = tmp_path / "project"
+    cwd.mkdir()
+    store = SessionStore(cwd, data_dir=data_dir)
+    session_id = "legacy-session"
+
+    legacy_path = _legacy_session_path(cwd, session_id)
+    legacy_path.parent.mkdir(parents=True, exist_ok=True)
+    legacy_path.write_text("legacy session\n", encoding="utf-8")
+
+    new_path = store._session_path(session_id)
+    original_open = Path.open
+
+    def fake_open(self: Path, *args, **kwargs):  # type: ignore[no-untyped-def]
+        mode = args[0] if args else kwargs.get("mode", "r")
+        if self == new_path and mode == "x":
+            with original_open(self, "w", encoding="utf-8") as handle:
+                handle.write("written by another process\n")
+            raise FileExistsError
+        return original_open(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", fake_open)
+
+    migrated = store._migrate_legacy_session(session_id)
+
+    assert migrated == new_path
+    assert new_path.read_text(encoding="utf-8") == "written by another process\n"

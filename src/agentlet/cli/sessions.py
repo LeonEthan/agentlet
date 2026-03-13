@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import secrets
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -19,6 +20,8 @@ SESSIONS_DIR = "sessions"
 LATEST_FILE = "latest"
 HISTORY_FILE = "history"
 
+logger = logging.getLogger(__name__)
+
 
 def get_data_dir() -> Path:
     """Return the global agentlet data directory (~/.agentlet)."""
@@ -27,7 +30,7 @@ def get_data_dir() -> Path:
 
 def _cwd_hash(cwd: Path) -> str:
     """Generate a short hash for the working directory path."""
-    return hashlib.md5(str(cwd.resolve()).encode()).hexdigest()[:16]
+    return hashlib.sha256(str(cwd.resolve()).encode("utf-8")).hexdigest()[:16]
 
 # Record type constants
 RECORD_TYPE_SESSION_STARTED = "session_started"
@@ -457,8 +460,22 @@ class SessionStore:
             return current_path
 
         sessions_root = self.data_dir / SESSIONS_DIR
-        for candidate in sorted(sessions_root.glob(f"*/{session_id}.jsonl")):
-            return candidate
+        candidates = []
+        if sessions_root.is_dir():
+            for bucket_dir in sorted(sessions_root.iterdir()):
+                if not bucket_dir.is_dir():
+                    continue
+                candidate = bucket_dir / f"{session_id}.jsonl"
+                if candidate.exists():
+                    candidates.append(candidate)
+        if candidates:
+            if len(candidates) > 1:
+                logger.warning(
+                    "Multiple session transcripts found for %s; using %s",
+                    session_id,
+                    candidates[0],
+                )
+            return candidates[0]
 
         migrated_path = self._migrate_legacy_session(session_id)
         if migrated_path is not None:
@@ -472,9 +489,12 @@ class SessionStore:
             return None
 
         new_path = self._session_path(session_id)
-        if not new_path.exists():
-            new_path.parent.mkdir(parents=True, exist_ok=True)
-            new_path.write_text(legacy_path.read_text(encoding="utf-8"), encoding="utf-8")
+        new_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with new_path.open("x", encoding="utf-8") as handle:
+                handle.write(legacy_path.read_text(encoding="utf-8"))
+        except FileExistsError:
+            pass
 
         if not self.latest_path.exists():
             try:
