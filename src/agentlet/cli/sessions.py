@@ -629,3 +629,16 @@ def _generate_session_id() -> str:
     return f"{timestamp}-{secrets.token_hex(4)}"
 
 
+def load_session_for_resume(
+    session_store: SessionStore,
+    *,
+    continue_session: bool,
+    session_id: str | None,
+) -> LoadedSession | None:
+    """Resolve the requested interactive session to resume, if any."""
+    if session_id is not None:
+        return session_store.load_session(session_id)
+    if continue_session:
+        return session_store.load_session(session_store.load_latest_session_id())
+    return None
+

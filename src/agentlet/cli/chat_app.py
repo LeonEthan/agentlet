@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from typing import Any
 from typing import TextIO
 
 from rich.console import Console
@@ -22,7 +23,7 @@ from agentlet.agent.tools.registry import ToolRegistry
 from agentlet.cli.presenter import ChatPresenter
 from agentlet.cli.prompt import create_prompt_session
 from agentlet.cli.repl import run_repl
-from agentlet.cli.sessions import LoadedSession, SessionStore
+from agentlet.cli.sessions import LoadedSession, SessionError, SessionStore, load_session_for_resume
 from agentlet.settings import AgentletSettings
 
 
@@ -98,12 +99,13 @@ def run_chat_command(
     """Execute the requested chat mode and return the process exit code."""
     message, interactive = _resolve_chat_mode(args, stdin=stdin, stdin_isatty=stdin_isatty)
     working_dir = cwd or Path.cwd()
+    chat_settings = _settings_from_args(args, fallback=settings)
 
     if not interactive:
         result = asyncio.run(
             run_chat(
                 message=message or "",
-                settings=settings,
+                settings=chat_settings,
                 provider_registry=provider_registry,
                 tool_registry=tool_registry,
             )
@@ -111,30 +113,56 @@ def run_chat_command(
         print(result.output, file=stdout)
         return 0
 
-    # Interactive mode - always start fresh session (no --session support)
     session_store = SessionStore(working_dir)
-    system_prompt = build_system_prompt()
-    config = _create_provider_config(settings)
-    loop = _create_agent_loop(
-        settings=settings,
-        provider_registry=provider_registry,
-        tool_registry=tool_registry,
-        system_prompt=system_prompt,
-        _config=config,
-    )
-    prompt = prompt_session or create_prompt_session(session_store.history_path)
-    info = session_store.start_session(
-        provider_name=config.name,
-        model=config.model,
-        api_base=config.api_base,
-        temperature=config.temperature,
-        max_tokens=config.max_tokens,
-        system_prompt=loop.system_prompt,
-    )
-    loaded_session = LoadedSession(
-        info=info,
-        context=Context(system_prompt=loop.system_prompt),
-    )
+    try:
+        loaded_session = load_session_for_resume(
+            session_store,
+            continue_session=args.continue_session,
+            session_id=args.session_id,
+        )
+    except SessionError as exc:
+        raise ChatCLIError(str(exc)) from exc
+
+    resumed = loaded_session is not None
+    if loaded_session is None:
+        system_prompt = build_system_prompt()
+        config = _create_provider_config(chat_settings)
+        loop = _create_agent_loop(
+            settings=chat_settings,
+            provider_registry=provider_registry,
+            tool_registry=tool_registry,
+            system_prompt=system_prompt,
+            _config=config,
+        )
+        prompt = prompt_session or create_prompt_session(session_store.history_path)
+        info = session_store.start_session(
+            provider_name=config.name,
+            model=config.model,
+            api_base=config.api_base,
+            temperature=config.temperature,
+            max_tokens=config.max_tokens,
+            system_prompt=loop.system_prompt,
+        )
+        loaded_session = LoadedSession(
+            info=info,
+            context=Context(system_prompt=loop.system_prompt),
+        )
+    else:
+        resume_settings = AgentletSettings(
+            provider=_resolve_from_session(args, loaded_session, "provider_name"),
+            model=_resolve_from_session(args, loaded_session, "model"),
+            api_key=chat_settings.api_key,
+            api_base=_resolve_from_session(args, loaded_session, "api_base"),
+            temperature=_resolve_from_session(args, loaded_session, "temperature"),
+            max_tokens=_resolve_from_session(args, loaded_session, "max_tokens"),
+        )
+        loop = _create_agent_loop(
+            settings=resume_settings,
+            provider_registry=provider_registry,
+            tool_registry=tool_registry,
+            system_prompt=loaded_session.context.system_prompt,
+        )
+        prompt = prompt_session or create_prompt_session(session_store.history_path)
 
     presenter = ChatPresenter(console or Console(file=stdout, stderr=False))
     return run_repl(
@@ -144,6 +172,23 @@ def run_chat_command(
         session_store=session_store,
         cwd=working_dir,
         loaded_session=loaded_session,
+        resumed=resumed,
+    )
+
+
+def _settings_from_args(args: Any, *, fallback: AgentletSettings) -> AgentletSettings:
+    """Build effective chat settings from parsed CLI arguments."""
+    def _value(name: str):
+        value = getattr(args, name, None)
+        return getattr(fallback, name) if value is None else value
+
+    return AgentletSettings(
+        provider=_value("provider"),
+        model=_value("model"),
+        api_key=_value("api_key"),
+        api_base=_value("api_base"),
+        temperature=_value("temperature"),
+        max_tokens=_value("max_tokens"),
     )
 
 
@@ -160,6 +205,16 @@ def _resolve_chat_mode(
 ) -> tuple[str | None, bool]:
     """Resolve CLI arguments and stdin shape into (message, interactive) tuple."""
     is_tty = stdin.isatty() if stdin_isatty is None else stdin_isatty
+    has_resume_flags = bool(
+        getattr(args, "continue_session", False)
+        or getattr(args, "session_id", None)
+        or getattr(args, "new_session", False)
+    )
+
+    if args.message is not None and has_resume_flags:
+        raise ChatCLIError("Session flags cannot be combined with a one-shot message.")
+    if args.print_mode and has_resume_flags:
+        raise ChatCLIError("Session flags cannot be combined with --print.")
 
     if args.message is not None:
         message = args.message.strip()
@@ -174,7 +229,15 @@ def _resolve_chat_mode(
             )
         return _read_and_validate_message(stdin), False
 
+    if has_resume_flags and not is_tty:
+        raise ChatCLIError("Session flags require an interactive TTY.")
+
     if not is_tty:
         return _read_and_validate_message(stdin), False
 
     return None, True
+
+
+def _resolve_from_session(args: Any, loaded_session: LoadedSession, attr: str) -> Any:
+    """Resolve a configuration value from the resumed transcript metadata."""
+    return getattr(loaded_session.info, attr) if loaded_session.info else getattr(args, attr)

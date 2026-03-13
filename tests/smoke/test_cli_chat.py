@@ -76,7 +76,7 @@ def test_main_chat_loads_defaults_from_user_settings(tmp_path, monkeypatch, caps
 
 
 def test_run_chat_command_interactive_new_session(tmp_path) -> None:
-    """Test interactive mode creates a new session each time (no --resume support)."""
+    """Interactive mode should resume the previous session when requested."""
     from conftest import build_capture_console
 
     provider = FakeProvider()
@@ -108,10 +108,9 @@ def test_run_chat_command_interactive_new_session(tmp_path) -> None:
 
     latest_session_id = session_store.load_latest_session_id()
 
-    # Second run creates a new session (no --continue support)
     console_two, output_two = build_capture_console()
     exit_code_two = run_chat_command(
-        make_cli_args(),
+        make_cli_args(continue_session=True),
         settings=settings,
         stdin=StringIO(""),
         stdout=StringIO(),
@@ -130,8 +129,8 @@ def test_run_chat_command_interactive_new_session(tmp_path) -> None:
     assert exit_code_two == 0
     assert "echo: first turn" in output_one.getvalue()
     assert "echo: second turn" in output_two.getvalue()
-    # First session only has first turn (no resume)
-    assert user_messages == ["first turn"]
+    assert "resumed" in output_two.getvalue()
+    assert user_messages == ["first turn", "second turn"]
     assert [config.model for config in captured_configs] == ["model-a", "model-a"]
     assert [config.api_base for config in captured_configs] == [
         "http://localhost:4000/v1",
@@ -139,3 +138,43 @@ def test_run_chat_command_interactive_new_session(tmp_path) -> None:
     ]
     assert [config.temperature for config in captured_configs] == [0.7, 0.7]
     assert [config.max_tokens for config in captured_configs] == [64, 64]
+
+
+def test_run_chat_command_one_shot_uses_cli_overrides() -> None:
+    captured_configs: list[ProviderConfig] = []
+    provider_registry = FakeProviderRegistry(capture_config=captured_configs)
+
+    exit_code = run_chat_command(
+        make_cli_args(
+            message="hello",
+            provider="anthropic",
+            model="claude-3-5-sonnet",
+            api_key="override-key",
+            api_base="http://override.example/v1",
+            temperature=0.4,
+            max_tokens=512,
+        ),
+        settings=AgentletSettings(
+            provider="openai",
+            model="gpt-5.4",
+            api_key="settings-key",
+            api_base="http://settings.example/v1",
+            temperature=0.0,
+            max_tokens=128,
+        ),
+        stdin=StringIO(""),
+        stdout=StringIO(),
+        stderr=StringIO(),
+        provider_registry=provider_registry,
+        stdin_isatty=True,
+    )
+
+    assert exit_code == 0
+    assert len(captured_configs) == 1
+    config = captured_configs[0]
+    assert config.name == "anthropic"
+    assert config.model == "claude-3-5-sonnet"
+    assert config.api_key == "override-key"
+    assert config.api_base == "http://override.example/v1"
+    assert config.temperature == 0.4
+    assert config.max_tokens == 512

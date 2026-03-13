@@ -111,6 +111,15 @@ def make_cli_args(**overrides) -> SimpleNamespace:
     defaults = {
         "message": None,
         "print_mode": False,
+        "continue_session": False,
+        "session_id": None,
+        "new_session": False,
+        "provider": None,
+        "model": None,
+        "api_key": None,
+        "api_base": None,
+        "temperature": None,
+        "max_tokens": None,
     }
     defaults.update(overrides)
     return SimpleNamespace(**defaults)

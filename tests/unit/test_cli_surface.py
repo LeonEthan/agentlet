@@ -8,9 +8,11 @@ import pytest
 from agentlet.agent.agent_loop import TurnEvent
 from agentlet.agent.context import Message, ToolCall, ToolResult
 from agentlet.agent.providers.registry import DEFAULT_MODEL, ProviderRegistryError
+from agentlet.cli.main import build_parser
 from agentlet.cli.chat_app import ChatCLIError, run_chat_command, _resolve_chat_mode
 from agentlet.cli.commands import CommandError, parse_command, summarize_history
 from agentlet.cli.presenter import ChatPresenter
+from agentlet.settings import AgentletSettings
 from conftest import build_capture_console, make_cli_args
 
 
@@ -44,6 +46,9 @@ def test_resolve_chat_mode_rejects_print_mode_on_interactive_tty_without_message
     args = SimpleNamespace(
         message=None,
         print_mode=True,
+        continue_session=False,
+        session_id=None,
+        new_session=False,
     )
 
     with pytest.raises(
@@ -51,6 +56,57 @@ def test_resolve_chat_mode_rejects_print_mode_on_interactive_tty_without_message
         match="--print requires a message argument or redirected stdin",
     ):
         _resolve_chat_mode(args, stdin=StringIO(""), stdin_isatty=True)
+
+
+def test_resolve_chat_mode_rejects_session_flags_with_message() -> None:
+    args = SimpleNamespace(
+        message="hello",
+        print_mode=False,
+        continue_session=True,
+        session_id=None,
+        new_session=False,
+    )
+
+    with pytest.raises(
+        ChatCLIError,
+        match="Session flags cannot be combined with a one-shot message",
+    ):
+        _resolve_chat_mode(args, stdin=StringIO(""), stdin_isatty=True)
+
+
+def test_resolve_chat_mode_rejects_session_flags_without_tty() -> None:
+    args = SimpleNamespace(
+        message=None,
+        print_mode=False,
+        continue_session=True,
+        session_id=None,
+        new_session=False,
+    )
+
+    with pytest.raises(ChatCLIError, match="Session flags require an interactive TTY"):
+        _resolve_chat_mode(args, stdin=StringIO("hello"), stdin_isatty=False)
+
+
+def test_build_parser_accepts_resume_and_override_flags() -> None:
+    parser = build_parser(AgentletSettings(provider="openai", model="gpt-5.4"))
+
+    parsed = parser.parse_args(
+        [
+            "chat",
+            "--continue",
+            "--provider",
+            "anthropic",
+            "--model",
+            "claude-3-5-sonnet",
+            "--api-key",
+            "test-key",
+        ]
+    )
+
+    assert parsed.continue_session is True
+    assert parsed.provider == "anthropic"
+    assert parsed.model == "claude-3-5-sonnet"
+    assert parsed.api_key == "test-key"
 
 
 def test_parse_command_rejects_arguments() -> None:
