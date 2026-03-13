@@ -116,6 +116,8 @@ No other UI dependency should be added in phase 2 unless it removes clear comple
 
 ## 6. User Experience Shape
 
+See the [CLI Usage Guide](../cli-usage.md) for complete documentation.
+
 ### 6.1 Command surface
 
 Phase 2 should preserve the current `chat` command while expanding its behavior:
@@ -136,6 +138,35 @@ Defaults:
 - if no message argument is provided and stdin is not a TTY, read stdin and run one-shot mode
 
 This keeps phase-1 scripts working while making interactive usage the natural TTY path.
+
+### 6.2 Configuration Management
+
+Configuration follows a layered approach:
+
+1. **Environment variables** (highest priority) - for temporary overrides and CI/CD
+2. **Settings file** (`~/.agentlet/settings.json`) - for persistent personal defaults
+3. **Built-in defaults** (lowest priority) - `openai` provider, `gpt-4o-mini` model
+
+The `agentlet init` command creates the settings file interactively or via CLI flags:
+
+```bash
+agentlet init \
+  --provider openai \
+  --api-key $OPENAI_API_KEY \
+  --model gpt-4o-mini \
+  --temperature 0.0
+```
+
+Environment variables follow LiteLLM's standard naming:
+- Generic: `AGENTLET_API_KEY`, `AGENTLET_MODEL`, `AGENTLET_PROVIDER`
+- Provider-specific: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `AZURE_API_KEY`, etc.
+
+Resolution priority for API keys:
+1. `AGENTLET_API_KEY` (project-specific override)
+2. `{PROVIDER}_API_KEY` (LiteLLM standard)
+3. `OPENAI_API_KEY` (backward compatibility fallback)
+4. Settings file
+5. None (will fail if required)
 
 ### 6.2 Interactive behavior
 
