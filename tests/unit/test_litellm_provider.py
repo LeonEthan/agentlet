@@ -30,7 +30,7 @@ def test_litellm_provider_builds_request_and_normalizes_dict_response() -> None:
 
     provider = LiteLLMProvider(
         ProviderConfig(
-            model="gpt-4o-mini",
+            model="gpt-5.4",
             api_key="test-key",
             api_base="http://localhost:4000/v1",
             temperature=0.2,
@@ -52,7 +52,7 @@ def test_litellm_provider_builds_request_and_normalizes_dict_response() -> None:
         )
     )
 
-    assert captured["model"] == "gpt-4o-mini"
+    assert captured["model"] == "gpt-5.4"
     assert captured["api_key"] == "test-key"
     assert captured["api_base"] == "http://localhost:4000/v1"
     assert captured["temperature"] == 0.2
@@ -72,6 +72,33 @@ def test_litellm_provider_builds_request_and_normalizes_dict_response() -> None:
     assert response.finish_reason == "stop"
     assert response.usage is not None
     assert response.usage.total_tokens == 3
+
+
+def test_litellm_provider_includes_explicit_null_auth_fields_when_unset() -> None:
+    captured: dict[str, object] = {}
+
+    async def fake_completion(**kwargs):
+        captured.update(kwargs)
+        return {
+            "choices": [
+                {
+                    "message": {"role": "assistant", "content": "hello"},
+                    "finish_reason": "stop",
+                }
+            ]
+        }
+
+    provider = LiteLLMProvider(
+        ProviderConfig(model="gpt-5.4"),
+        completion_func=fake_completion,
+    )
+
+    asyncio.run(provider.complete([Message(role="user", content="hello")]))
+
+    assert "api_key" in captured
+    assert "api_base" in captured
+    assert captured["api_key"] is None
+    assert captured["api_base"] is None
 
 
 def test_litellm_provider_normalizes_tool_calls_from_object_response() -> None:
@@ -97,7 +124,7 @@ def test_litellm_provider_normalizes_tool_calls_from_object_response() -> None:
         )
 
     provider = LiteLLMProvider(
-        ProviderConfig(model="gpt-4o-mini"),
+        ProviderConfig(model="gpt-5.4"),
         completion_func=fake_completion,
     )
 
@@ -133,7 +160,7 @@ def test_litellm_provider_serializes_dict_tool_arguments_as_json() -> None:
         }
 
     provider = LiteLLMProvider(
-        ProviderConfig(model="gpt-4o-mini"),
+        ProviderConfig(model="gpt-5.4"),
         completion_func=fake_completion,
     )
 
@@ -203,7 +230,7 @@ def test_litellm_provider_normalizes_streaming_deltas_and_tool_calls() -> None:
         return _stream()
 
     provider = LiteLLMProvider(
-        ProviderConfig(model="gpt-4o-mini"),
+        ProviderConfig(model="gpt-5.4"),
         stream_completion_func=fake_stream_completion,
     )
 

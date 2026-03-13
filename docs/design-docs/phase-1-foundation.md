@@ -302,13 +302,13 @@ Why this path:
 Phase 1 should expose one obvious runtime command plus a bootstrap command, for example:
 
 ```bash
-uv run python -m agentlet.cli.main init --api-key your_api_key
+uv run python -m agentlet.cli.main init --model gpt-5.4
 ```
 
 and:
 
 ```bash
-uv run python -m agentlet.cli.main chat --model gpt-4o-mini
+uv run python -m agentlet.cli.main chat --model gpt-5.4
 ```
 
 Behavior:
@@ -325,8 +325,8 @@ This is enough to validate the loop before adding a REPL or session persistence.
 Environment behavior:
 
 - `setting.json` values are treated as defaults for provider name, model, API key, base URL, temperature, and max tokens
-- exported shell environment variables must win over `setting.json`
-- this keeps local real-provider testing simple without hardcoding secrets into repeated commands
+- local CLI behavior should come from `setting.json` plus built-in defaults
+- this keeps runtime configuration explicit and avoids hidden override layers
 
 Example local test:
 

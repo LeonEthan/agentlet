@@ -9,7 +9,7 @@ phase-1 runtime:
 
 - keep one-shot chat behavior for argv and stdin usage
 - add an interactive REPL for TTY sessions
-- persist interactive transcripts under `.agentlet/sessions/`
+- persist interactive transcripts under `~/.agentlet/sessions/` (grouped by cwd hash)
 - add normalized streaming and turn events at the runtime boundary
 - keep `agent/` free of `rich` and `prompt_toolkit` imports
 

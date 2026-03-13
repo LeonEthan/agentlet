@@ -8,6 +8,7 @@ from agentlet.cli import main as cli_main
 from agentlet.settings import (
     AgentletSettings,
     SettingsError,
+    canonical_settings_path,
     default_settings_path,
     load_settings,
     resolve_settings_defaults,
@@ -54,29 +55,24 @@ def test_load_settings_rejects_unknown_keys(tmp_path) -> None:
         load_settings(settings_path)
 
 
-def test_resolve_settings_defaults_prefers_exported_env(monkeypatch) -> None:
-    monkeypatch.setenv("AGENTLET_PROVIDER", "custom-provider")
-    monkeypatch.setenv("AGENTLET_MODEL", "env-model")
-    monkeypatch.setenv("OPENAI_API_KEY", "env-key")
-    monkeypatch.setenv("OPENAI_BASE_URL", "http://env.example/v1")
-
+def test_resolve_settings_defaults_uses_stored_values_and_built_ins() -> None:
     resolved = resolve_settings_defaults(
         AgentletSettings(
-            provider="file-provider",
-            model="file-model",
+            provider=None,
+            model=None,
             api_key="file-key",
             api_base="http://file.example/v1",
-            temperature=0.4,
+            temperature=None,
             max_tokens=99,
         )
     )
 
     assert resolved == AgentletSettings(
-        provider="custom-provider",
-        model="env-model",
-        api_key="env-key",
-        api_base="http://env.example/v1",
-        temperature=0.4,
+        provider="openai",
+        model="gpt-5.4",
+        api_key="file-key",
+        api_base="http://file.example/v1",
+        temperature=0.0,
         max_tokens=99,
     )
 
@@ -97,10 +93,6 @@ def test_main_init_writes_canonical_settings_file(tmp_path, capsys) -> None:
             "openai",
             "--model",
             "init-model",
-            "--api-key",
-            "init-key",
-            "--api-base",
-            "http://localhost:4000/v1",
             "--temperature",
             "0.3",
             "--max-tokens",
@@ -117,8 +109,8 @@ def test_main_init_writes_canonical_settings_file(tmp_path, capsys) -> None:
     assert json.loads(settings_path.read_text(encoding="utf-8")) == {
         "provider": "openai",
         "model": "init-model",
-        "api_key": "init-key",
-        "api_base": "http://localhost:4000/v1",
+        "api_key": None,
+        "api_base": None,
         "temperature": 0.3,
         "max_tokens": 256,
     }
@@ -141,7 +133,7 @@ def test_main_init_force_repairs_invalid_settings_file(tmp_path) -> None:
     settings_path.write_text("{not-json}\n", encoding="utf-8")
 
     exit_code = cli_main.main(
-        ["init", "--force", "--api-key", "fixed-key", "--model", "fixed-model"],
+        ["init", "--force", "--model", "fixed-model"],
         home_dir=tmp_path,
     )
 
@@ -149,8 +141,194 @@ def test_main_init_force_repairs_invalid_settings_file(tmp_path) -> None:
     assert json.loads(settings_path.read_text(encoding="utf-8")) == {
         "provider": "openai",
         "model": "fixed-model",
-        "api_key": "fixed-key",
+        "api_key": None,
         "api_base": None,
         "temperature": 0.0,
         "max_tokens": None,
     }
+
+
+def test_main_init_force_migrates_legacy_settings_filename(tmp_path) -> None:
+    legacy_path = tmp_path / ".agentlet" / "setting.json"
+    legacy_path.parent.mkdir(parents=True)
+    legacy_path.write_text(
+        json.dumps(
+            {
+                "provider": "openai",
+                "model": "legacy-model",
+                "api_key": "legacy-key",
+                "api_base": "http://legacy.example/v1",
+                "temperature": 0.2,
+                "max_tokens": 64,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    exit_code = cli_main.main(
+        ["init", "--force", "--model", "fixed-model"],
+        home_dir=tmp_path,
+    )
+
+    new_path = canonical_settings_path(tmp_path)
+
+    assert exit_code == 0
+    assert new_path.exists()
+    assert default_settings_path(tmp_path) == new_path
+    assert json.loads(new_path.read_text(encoding="utf-8")) == {
+        "provider": "openai",
+        "model": "fixed-model",
+        "api_key": "legacy-key",
+        "api_base": "http://legacy.example/v1",
+        "temperature": 0.2,
+        "max_tokens": 64,
+    }
+
+
+def test_main_init_force_preserves_existing_sensitive_settings(tmp_path) -> None:
+    settings_path = default_settings_path(tmp_path)
+    settings_path.parent.mkdir(parents=True)
+    settings_path.write_text(
+        json.dumps(
+            {
+                "provider": "openai",
+                "model": "old-model",
+                "api_key": "stored-key",
+                "api_base": "http://stored.example/v1",
+                "temperature": 0.1,
+                "max_tokens": 32,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    exit_code = cli_main.main(
+        ["init", "--force", "--model", "new-model", "--temperature", "0.8"],
+        home_dir=tmp_path,
+    )
+
+    assert exit_code == 0
+    assert json.loads(settings_path.read_text(encoding="utf-8")) == {
+        "provider": "openai",
+        "model": "new-model",
+        "api_key": "stored-key",
+        "api_base": "http://stored.example/v1",
+        "temperature": 0.8,
+        "max_tokens": 32,
+    }
+
+
+def test_main_init_force_rejects_provider_change_with_stored_sensitive_settings(tmp_path) -> None:
+    settings_path = default_settings_path(tmp_path)
+    settings_path.parent.mkdir(parents=True)
+    settings_path.write_text(
+        json.dumps(
+            {
+                "provider": "openai",
+                "model": "old-model",
+                "api_key": "stored-key",
+                "api_base": "http://stored.example/v1",
+                "temperature": 0.1,
+                "max_tokens": 32,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli_main.main(
+            ["init", "--force", "--provider", "anthropic", "--model", "claude-3-5-sonnet"],
+            home_dir=tmp_path,
+        )
+
+    assert exc_info.value.code == 2
+    assert json.loads(settings_path.read_text(encoding="utf-8")) == {
+        "provider": "openai",
+        "model": "old-model",
+        "api_key": "stored-key",
+        "api_base": "http://stored.example/v1",
+        "temperature": 0.1,
+        "max_tokens": 32,
+    }
+
+
+def test_load_settings_only_defaults_section(tmp_path) -> None:
+    settings_path = default_settings_path(tmp_path)
+    settings_path.parent.mkdir(parents=True)
+    settings_path.write_text(
+        json.dumps(
+            {
+                "defaults": {
+                    "provider": "anthropic",
+                    "model": "claude-3",
+                }
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    loaded = load_settings(settings_path)
+
+    assert loaded.provider == "anthropic"
+    assert loaded.model == "claude-3"
+
+
+def test_default_settings_path_prefers_new_name(tmp_path) -> None:
+    path = default_settings_path(tmp_path)
+    assert path.name == "settings.json"
+
+
+def test_default_settings_path_uses_legacy_when_only_it_exists(tmp_path) -> None:
+    legacy_path = tmp_path / ".agentlet" / "setting.json"
+    legacy_path.parent.mkdir(parents=True)
+    legacy_path.write_text("{}", encoding="utf-8")
+
+    path = default_settings_path(tmp_path)
+    assert path.name == "setting.json"
+
+
+def test_default_settings_path_prefers_new_when_both_exist(tmp_path) -> None:
+    new_path = tmp_path / ".agentlet" / "settings.json"
+    legacy_path = tmp_path / ".agentlet" / "setting.json"
+    new_path.parent.mkdir(parents=True)
+    new_path.write_text("{}", encoding="utf-8")
+    legacy_path.write_text("{}", encoding="utf-8")
+
+    path = default_settings_path(tmp_path)
+    assert path.name == "settings.json"
+
+
+def test_load_settings_rejects_unknown_keys_in_nested_defaults(tmp_path) -> None:
+    settings_path = default_settings_path(tmp_path)
+    settings_path.parent.mkdir(parents=True)
+    settings_path.write_text(
+        json.dumps(
+            {
+                "defaults": {
+                    "model": "test-model",
+                    "extra": "nope",
+                }
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SettingsError, match="Unsupported settings keys"):
+        load_settings(settings_path)
+
+
+def test_load_settings_rejects_non_object_defaults(tmp_path) -> None:
+    settings_path = default_settings_path(tmp_path)
+    settings_path.parent.mkdir(parents=True)
+    settings_path.write_text(
+        json.dumps({"defaults": "not-an-object"}) + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SettingsError, match="must be an object"):
+        load_settings(settings_path)

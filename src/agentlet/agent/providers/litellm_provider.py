@@ -206,6 +206,8 @@ class LiteLLMProvider:
         request = {
             "model": model or self.config.model,
             "messages": [message.to_provider_dict() for message in messages],
+            "api_key": self.config.api_key,
+            "api_base": self.config.api_base,
             "temperature": (
                 self.config.temperature if temperature is None else temperature
             ),
@@ -216,10 +218,6 @@ class LiteLLMProvider:
         )
         if resolved_max_tokens is not None:
             request["max_tokens"] = resolved_max_tokens
-        if self.config.api_key is not None:
-            request["api_key"] = self.config.api_key
-        if self.config.api_base is not None:
-            request["api_base"] = self.config.api_base
         if tools:
             request["tools"] = [tool.to_provider_dict() for tool in tools]
         return request

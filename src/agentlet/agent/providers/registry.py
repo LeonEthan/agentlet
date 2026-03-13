@@ -40,7 +40,7 @@ class ProviderStreamEvent:
 
 # Default provider configuration values
 DEFAULT_PROVIDER: str = "openai"
-DEFAULT_MODEL: str = "gpt-4o-mini"
+DEFAULT_MODEL: str = "gpt-5.4"
 DEFAULT_TEMPERATURE: float = 0.0
 
 
@@ -80,6 +80,19 @@ class LLMProvider(Protocol):
 
 ProviderFactory = Callable[[ProviderConfig], LLMProvider]
 
+SUPPORTED_LITELLM_PROVIDERS: tuple[str, ...] = (
+    "openai",
+    "anthropic",
+    "azure",
+    "gemini",
+    "cohere",
+    "together_ai",
+    "groq",
+    "mistral",
+    "fireworks",
+    "anyscale",
+)
+
 
 class ProviderRegistryError(RuntimeError):
     """Raised when a configured provider name cannot be resolved."""
@@ -106,7 +119,8 @@ class ProviderRegistry:
             # require LiteLLM to be imported eagerly.
             from agentlet.agent.providers.litellm_provider import LiteLLMProvider
 
-            self._factories["openai"] = LiteLLMProvider
+            for name in SUPPORTED_LITELLM_PROVIDERS:
+                self._factories[name] = LiteLLMProvider
 
         factory = self._factories.get(provider_name)
         if factory is None:

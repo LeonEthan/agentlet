@@ -111,14 +111,9 @@ def make_cli_args(**overrides) -> SimpleNamespace:
     defaults = {
         "message": None,
         "print_mode": False,
-        "continue_session": False,
-        "session_id": None,
-        "new_session": False,
-        "provider": "openai",
-        "model": "gpt-4o-mini",
-        "api_key": "test-key",
-        "api_base": "http://localhost:4000/v1",
-        "temperature": 0.0,
+        "provider": None,
+        "model": None,
+        "temperature": None,
         "max_tokens": None,
     }
     defaults.update(overrides)

@@ -1,4 +1,4 @@
-"""Real API integration tests using `~/.agentlet/setting.json`.
+"""Real API integration tests using `~/.agentlet/settings.json`.
 
 This module tests the actual API calls with real credentials from the user-level
 settings file.
@@ -8,7 +8,8 @@ Note: This file relies on conftest.py for sys.path setup. Run with:
     uv run python -m pytest tests/test_real_api.py -v
 
 Or after bootstrapping local settings:
-    agentlet init --api-key your_api_key --api-base https://api.openai.com/v1
+    agentlet init --model gpt-5.4
+    # then edit ~/.agentlet/settings.json with api_key/api_base as needed
     uv run python -m pytest tests/test_real_api.py -v
 """
 
@@ -63,23 +64,25 @@ class TestSettingsLoading:
     """Test that local settings are properly loaded."""
 
     def test_api_key_loaded(self):
-        """Verify OPENAI_API_KEY-equivalent settings are loaded from setting.json."""
+        """Verify API key settings are loaded from settings.json."""
         api_key = _get_env_config().api_key
-        assert api_key, "API key not found in ~/.agentlet/setting.json or exported env vars"
+        assert api_key, "API key not found in ~/.agentlet/settings.json"
         assert len(api_key) > 20, f"API key seems too short: {api_key[:10]}..."
         print(f"\n  API Key: {api_key[:15]}... (length: {len(api_key)})")
 
     def test_base_url_loaded(self):
-        """Verify OPENAI_BASE_URL-equivalent settings are loaded from setting.json."""
+        """Verify base URL settings are loaded when the provider uses one."""
         base_url = _get_env_config().api_base
-        assert base_url, "Base URL not found in ~/.agentlet/setting.json or exported env vars"
-        assert base_url.startswith("http"), f"Invalid base URL: {base_url}"
-        print(f"\n  Base URL: {base_url}")
+        if base_url is not None:
+            assert base_url.startswith("http"), f"Invalid base URL: {base_url}"
+            print(f"\n  Base URL: {base_url}")
+        else:
+            print("\n  Base URL: not configured for this provider")
 
     def test_model_config_loaded(self):
-        """Verify AGENTLET_MODEL-equivalent settings are loaded from setting.json."""
+        """Verify model settings are loaded from settings.json or built-in defaults."""
         model = _get_env_config().model
-        assert model, "Model not found in ~/.agentlet/setting.json or exported env vars"
+        assert model, "Model not found in ~/.agentlet/settings.json or built-in defaults"
         print(f"\n  Model: {model}")
 
 
@@ -90,15 +93,14 @@ class TestProviderConfig:
         """Test ProviderConfig dataclass with effective local settings."""
         config = _get_env_config(temperature=0.7, max_tokens=100)
 
-        assert config.name == DEFAULT_PROVIDER
+        assert config.name
         assert config.api_key is not None
-        assert config.api_base is not None
         assert config.temperature == 0.7
         assert config.max_tokens == 100
         print(f"\n  Config created successfully:")
         print(f"    - Provider: {config.name}")
         print(f"    - Model: {config.model}")
-        print(f"    - API Base: {config.api_base}")
+        print(f"    - API Base: {config.api_base or 'not configured'}")
 
     def test_registry_creates_litellm_provider(self):
         """Test ProviderRegistry creates LiteLLM provider."""
@@ -316,11 +318,12 @@ class TestErrorHandling:
     @pytest.mark.asyncio
     async def test_invalid_api_key(self):
         """Test behavior with invalid API key."""
+        resolved_settings = resolve_settings_defaults(load_settings())
         config = ProviderConfig(
             name=DEFAULT_PROVIDER,
-            model=os.getenv("AGENTLET_MODEL", DEFAULT_MODEL),
+            model=resolved_settings.model or DEFAULT_MODEL,
             api_key="invalid-key-12345",
-            api_base=os.getenv("OPENAI_BASE_URL"),
+            api_base=resolved_settings.api_base,
         )
         provider = LiteLLMProvider(config)
 

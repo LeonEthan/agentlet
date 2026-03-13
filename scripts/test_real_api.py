@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Quick real API test script.
 
-Run this to verify your .env configuration works correctly.
+Run this to verify your exported env vars or ~/.agentlet/settings.json config.
 
 Usage:
     uv run python scripts/test_real_api.py
@@ -10,7 +10,6 @@ Usage:
 from __future__ import annotations
 
 import asyncio
-import os
 import sys
 from pathlib import Path
 
@@ -18,71 +17,73 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root / "src"))
 
-# Load .env using the shared utility from CLI
-from agentlet.cli.main import inject_project_env
-
-inject_project_env()
-
 from agentlet.agent.agent_loop import AgentLoop
 from agentlet.agent.context import Context, Message
 from agentlet.agent.providers.litellm_provider import LiteLLMProvider
-from agentlet.agent.providers.registry import ProviderConfig, ProviderRegistry
+from agentlet.agent.providers.registry import (
+    DEFAULT_MODEL,
+    DEFAULT_PROVIDER,
+    ProviderConfig,
+    ProviderRegistry,
+)
 from agentlet.agent.tools.registry import ToolRegistry
 from agentlet.agent.prompts.system_prompt import build_system_prompt
-
-# Default provider name used across tests
-DEFAULT_PROVIDER = "openai"
+from agentlet.settings import load_settings, resolve_settings_defaults
 
 
-def check_env():
-    """Check environment variables."""
+def _load_effective_settings():
+    """Load the same effective settings used by the CLI."""
+    return resolve_settings_defaults(load_settings())
+
+
+def check_configuration() -> bool:
+    """Check the effective provider configuration."""
     print("\n" + "=" * 60)
-    print("Environment Check")
+    print("Configuration Check")
     print("=" * 60)
 
-    api_key = os.getenv("OPENAI_API_KEY")
-    base_url = os.getenv("OPENAI_BASE_URL")
-    model = os.getenv("AGENTLET_MODEL")
+    settings = _load_effective_settings()
+    provider = settings.provider or DEFAULT_PROVIDER
+    model = settings.model or DEFAULT_MODEL
+    api_key = settings.api_key
+    base_url = settings.api_base
 
     all_ok = True
 
+    print(f"✓ provider: {provider}")
+    print(f"✓ model: {model}")
+
     if api_key:
         masked = api_key[:15] + "..." if len(api_key) > 15 else api_key
-        print(f"✓ OPENAI_API_KEY: {masked} ({len(api_key)} chars)")
+        print(f"✓ api_key: {masked} ({len(api_key)} chars)")
     else:
-        print("✗ OPENAI_API_KEY: Not set")
+        print("✗ api_key: Not set")
         all_ok = False
 
     if base_url:
-        print(f"✓ OPENAI_BASE_URL: {base_url}")
+        print(f"✓ api_base: {base_url}")
     else:
-        print("✗ OPENAI_BASE_URL: Not set")
-        all_ok = False
-
-    if model:
-        print(f"✓ AGENTLET_MODEL: {model}")
-    else:
-        print("✗ AGENTLET_MODEL: Not set")
-        all_ok = False
+        print("• api_base: not set")
 
     if not all_ok:
-        print("\n❌ Missing required environment variables!")
-        print("Please check your .env file.")
+        print("\n❌ Missing required configuration!")
+        print("Set exported env vars or run `agentlet init` first.")
         return False
 
     return True
 
 
-def _get_env_config(
+def _get_effective_config(
     temperature: float = 0.0,
     max_tokens: int | None = None,
 ) -> ProviderConfig:
-    """Create a ProviderConfig from environment variables."""
+    """Create a ProviderConfig from the effective local settings."""
+    settings = _load_effective_settings()
     return ProviderConfig(
-        name=DEFAULT_PROVIDER,
-        model=os.getenv("AGENTLET_MODEL"),
-        api_key=os.getenv("OPENAI_API_KEY"),
-        api_base=os.getenv("OPENAI_BASE_URL"),
+        name=settings.provider or DEFAULT_PROVIDER,
+        model=settings.model or DEFAULT_MODEL,
+        api_key=settings.api_key,
+        api_base=settings.api_base,
         temperature=temperature,
         max_tokens=max_tokens,
     )
@@ -95,7 +96,7 @@ async def test_provider():
     print("=" * 60)
 
     try:
-        config = _get_env_config(temperature=0.0, max_tokens=30)
+        config = _get_effective_config(temperature=0.0, max_tokens=30)
         provider = LiteLLMProvider(config)
 
         messages = [
@@ -130,7 +131,7 @@ async def test_agent_loop():
     print("=" * 60)
 
     try:
-        config = _get_env_config(temperature=0.0, max_tokens=50)
+        config = _get_effective_config(temperature=0.0, max_tokens=50)
         registry = ProviderRegistry()
         provider = registry.create(config)
 
@@ -168,14 +169,15 @@ async def test_cli_simulation():
     print("=" * 60)
 
     try:
+        config = _get_effective_config(temperature=0.0, max_tokens=30)
         result = await run_chat(
             message="Say 'CLI simulation OK'",
-            provider_name=DEFAULT_PROVIDER,
-            model=os.getenv("AGENTLET_MODEL"),
-            api_key=os.getenv("OPENAI_API_KEY"),
-            api_base=os.getenv("OPENAI_BASE_URL"),
-            temperature=0.0,
-            max_tokens=30,
+            provider_name=config.name,
+            model=config.model,
+            api_key=config.api_key,
+            api_base=config.api_base,
+            temperature=config.temperature,
+            max_tokens=config.max_tokens,
         )
 
         print("✓ Response received")
@@ -197,7 +199,7 @@ async def test_multi_turn():
     print("=" * 60)
 
     try:
-        config = _get_env_config(temperature=0.0, max_tokens=50)
+        config = _get_effective_config(temperature=0.0, max_tokens=50)
         provider = LiteLLMProvider(config)
 
         loop = AgentLoop(
@@ -244,8 +246,8 @@ async def main():
     print("Agentlet Real API Tests")
     print("=" * 60)
 
-    # Check environment
-    if not check_env():
+    # Check configuration
+    if not check_configuration():
         return 1
 
     # Run tests concurrently for efficiency
