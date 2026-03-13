@@ -12,6 +12,7 @@ from agentlet.agent.providers.registry import (
 from agentlet.settings import (
     AgentletSettings,
     SettingsError,
+    canonical_settings_path,
     default_settings_path,
     load_settings,
     resolve_settings_defaults,
@@ -117,6 +118,7 @@ def main(argv: list[str] | None = None, *, home_dir: Path | None = None) -> int:
     """Parse CLI input and dispatch to the requested command mode."""
     raw_argv = list(sys.argv[1:] if argv is None else argv)
     settings_path = default_settings_path(home_dir)
+    write_path = canonical_settings_path(home_dir)
     settings_error: SettingsError | None = None
     try:
         stored_settings = load_settings(settings_path)
@@ -138,7 +140,7 @@ def main(argv: list[str] | None = None, *, home_dir: Path | None = None) -> int:
                     temperature=args.temperature,
                     max_tokens=args.max_tokens,
                 ),
-                settings_path=settings_path,
+                settings_path=write_path,
                 force=args.force,
             )
         except SettingsError as exc:

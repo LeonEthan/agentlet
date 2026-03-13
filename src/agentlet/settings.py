@@ -75,14 +75,20 @@ class AgentletSettings:
         }
 
 
+def canonical_settings_path(home_dir: Path | None = None) -> Path:
+    """Return the canonical `settings.json` path for this user."""
+    base_dir = home_dir if home_dir is not None else Path.home()
+    return base_dir / SETTINGS_DIRNAME / SETTINGS_FILENAME
+
+
 def default_settings_path(home_dir: Path | None = None) -> Path:
-    """Return the canonical `settings.json` path for this user.
+    """Return the preferred settings path for reads.
 
     Prefers `settings.json` (new) over `setting.json` (legacy) if both exist.
     Returns the new path by default if neither exists.
     """
+    new_path = canonical_settings_path(home_dir)
     base_dir = home_dir if home_dir is not None else Path.home()
-    new_path = base_dir / SETTINGS_DIRNAME / SETTINGS_FILENAME
     legacy_path = base_dir / SETTINGS_DIRNAME / SETTINGS_FILENAME_LEGACY
 
     # Prefer new path, but fall back to legacy if only it exists
@@ -254,7 +260,7 @@ def write_settings(
     force: bool = False,
 ) -> Path:
     """Persist the canonical settings payload to disk."""
-    path = settings_path or default_settings_path()
+    path = settings_path or canonical_settings_path()
     if path.exists() and not force:
         raise SettingsError(f"Settings file already exists: {path}. Use --force to overwrite it.")
 

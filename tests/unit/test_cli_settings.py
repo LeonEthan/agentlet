@@ -8,6 +8,7 @@ from agentlet.cli import main as cli_main
 from agentlet.settings import (
     AgentletSettings,
     SettingsError,
+    canonical_settings_path,
     default_settings_path,
     load_settings,
     resolve_settings_defaults,
@@ -162,6 +163,49 @@ def test_main_init_force_repairs_invalid_settings_file(tmp_path, monkeypatch) ->
         "api_base": None,
         "temperature": 0.0,
         "max_tokens": None,
+    }
+
+
+def test_main_init_force_migrates_legacy_settings_filename(tmp_path, monkeypatch) -> None:
+    legacy_path = tmp_path / ".agentlet" / "setting.json"
+    legacy_path.parent.mkdir(parents=True)
+    legacy_path.write_text(
+        json.dumps(
+            {
+                "provider": "openai",
+                "model": "legacy-model",
+                "api_key": "legacy-key",
+                "api_base": "http://legacy.example/v1",
+                "temperature": 0.2,
+                "max_tokens": 64,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.delenv("AGENTLET_API_KEY", raising=False)
+    monkeypatch.delenv("AGENTLET_BASE_URL", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+
+    exit_code = cli_main.main(
+        ["init", "--force", "--api-key", "fixed-key", "--model", "fixed-model"],
+        home_dir=tmp_path,
+    )
+
+    new_path = canonical_settings_path(tmp_path)
+
+    assert exit_code == 0
+    assert new_path.exists()
+    assert default_settings_path(tmp_path) == new_path
+    assert json.loads(new_path.read_text(encoding="utf-8")) == {
+        "provider": "openai",
+        "model": "fixed-model",
+        "api_key": "fixed-key",
+        "api_base": "http://legacy.example/v1",
+        "temperature": 0.2,
+        "max_tokens": 64,
     }
 
 

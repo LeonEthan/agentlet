@@ -138,7 +138,7 @@ def run_repl(
 
         records = recorder.build_records(current_session.session_id)
         session_store.append_records(
-            current_session.session_id,
+            current_session,
             records,
             update_latest=True,
         )

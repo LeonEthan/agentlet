@@ -184,6 +184,8 @@ class SessionStore:
         # Sessions are grouped by cwd hash: ~/.agentlet/sessions/{hash}/
         self.sessions_dir = self.data_dir / SESSIONS_DIR / _cwd_hash(cwd)
         self.latest_path = self.sessions_dir / LATEST_FILE
+        self.legacy_sessions_dir = self.cwd / AGENTLET_DIR / SESSIONS_DIR
+        self.legacy_latest_path = self.legacy_sessions_dir / LATEST_FILE
         # History is global (not scoped to cwd)
         self.history_path = self.data_dir / HISTORY_FILE
 
@@ -233,13 +235,22 @@ class SessionStore:
 
     def append_records(
         self,
-        session_id: str,
+        session: str | SessionInfo,
         records: list[dict[str, Any]],
         *,
         update_latest: bool,
     ) -> None:
         """Append committed turn records and optionally update latest metadata."""
-        path = self._session_path(session_id)
+        if isinstance(session, SessionInfo):
+            session_id = session.session_id
+            path = session.transcript_path
+            latest_path = path.parent / LATEST_FILE
+        else:
+            session_id = session
+            path = self._session_path(session_id)
+            latest_path = self.latest_path
+
+        path.parent.mkdir(parents=True, exist_ok=True)
 
         # Batch write all records in a single file operation
         with path.open("a", encoding="utf-8") as handle:
@@ -248,23 +259,28 @@ class SessionStore:
                 handle.write("\n")
 
         if update_latest:
-            self._write_latest(session_id)
+            self._write_latest(session_id, latest_path=latest_path)
 
     def load_latest_session_id(self) -> str:
         """Read the latest session pointer for the current working directory."""
         try:
             content = self.latest_path.read_text(encoding="utf-8").strip()
         except FileNotFoundError as exc:
-            raise SessionNotFoundError(
-                f"No latest session metadata found at {self.latest_path}."
-            ) from exc
+            try:
+                content = self.legacy_latest_path.read_text(encoding="utf-8").strip()
+            except FileNotFoundError:
+                raise SessionNotFoundError(
+                    f"No latest session metadata found at {self.latest_path}."
+                ) from exc
         if not content:
-            raise SessionError(f"Latest session metadata is empty: {self.latest_path}")
+            if self.latest_path.exists():
+                raise SessionError(f"Latest session metadata is empty: {self.latest_path}")
+            raise SessionError(f"Latest session metadata is empty: {self.legacy_latest_path}")
         return content
 
     def load_session(self, session_id: str) -> LoadedSession:
         """Load one transcript and rebuild its in-memory context."""
-        path = self._session_path(session_id)
+        path = self._resolve_session_path(session_id)
 
         try:
             file_handle = path.open("r", encoding="utf-8")
@@ -272,6 +288,7 @@ class SessionStore:
             raise SessionNotFoundError(f"Session transcript not found: {path}") from exc
 
         system_prompt: str | None = None
+        session_cwd = str(self.cwd)
         provider_name = "unknown"
         model = "unknown"
         api_base: str | None = None
@@ -303,6 +320,7 @@ class SessionStore:
                         payload,
                         "system_prompt",
                     )
+                    session_cwd = self._read_optional_text(payload, "cwd") or session_cwd
                     provider_name = str(payload.get("provider_name") or provider_name)
                     model = str(payload.get("model") or model)
                     api_base = self._read_optional_text(payload, "api_base")
@@ -414,7 +432,7 @@ class SessionStore:
         info = SessionInfo(
             session_id=session_id,
             transcript_path=path,
-            cwd=str(self.cwd),
+            cwd=session_cwd,
             provider_name=provider_name,
             model=model,
             api_base=api_base,
@@ -430,11 +448,50 @@ class SessionStore:
     def _session_path(self, session_id: str) -> Path:
         return self.sessions_dir / f"{session_id}.jsonl"
 
-    def _write_latest(self, session_id: str) -> None:
-        self.sessions_dir.mkdir(parents=True, exist_ok=True)
-        temp_path = self.latest_path.with_suffix(".tmp")
+    def _legacy_session_path(self, session_id: str) -> Path:
+        return self.legacy_sessions_dir / f"{session_id}.jsonl"
+
+    def _resolve_session_path(self, session_id: str) -> Path:
+        current_path = self._session_path(session_id)
+        if current_path.exists():
+            return current_path
+
+        sessions_root = self.data_dir / SESSIONS_DIR
+        for candidate in sorted(sessions_root.glob(f"*/{session_id}.jsonl")):
+            return candidate
+
+        migrated_path = self._migrate_legacy_session(session_id)
+        if migrated_path is not None:
+            return migrated_path
+
+        return current_path
+
+    def _migrate_legacy_session(self, session_id: str) -> Path | None:
+        legacy_path = self._legacy_session_path(session_id)
+        if not legacy_path.exists():
+            return None
+
+        new_path = self._session_path(session_id)
+        if not new_path.exists():
+            new_path.parent.mkdir(parents=True, exist_ok=True)
+            new_path.write_text(legacy_path.read_text(encoding="utf-8"), encoding="utf-8")
+
+        if not self.latest_path.exists():
+            try:
+                latest_session_id = self.legacy_latest_path.read_text(encoding="utf-8").strip()
+            except FileNotFoundError:
+                latest_session_id = None
+            if latest_session_id == session_id:
+                self._write_latest(session_id)
+
+        return new_path
+
+    def _write_latest(self, session_id: str, *, latest_path: Path | None = None) -> None:
+        resolved_latest_path = latest_path or self.latest_path
+        resolved_latest_path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = resolved_latest_path.with_suffix(".tmp")
         temp_path.write_text(f"{session_id}\n", encoding="utf-8")
-        temp_path.replace(self.latest_path)
+        temp_path.replace(resolved_latest_path)
 
     def _parse_record(
         self,

@@ -26,6 +26,38 @@ def _session_path(tmp_path: Path, cwd: Path, session_id: str) -> Path:
     return tmp_path / "sessions" / _cwd_hash(cwd) / f"{session_id}.jsonl"
 
 
+def _legacy_session_path(cwd: Path, session_id: str) -> Path:
+    """Return the legacy project-local session path."""
+    return cwd / ".agentlet" / "sessions" / f"{session_id}.jsonl"
+
+
+def _turn_records(session_id: str, user_content: str, assistant_content: str) -> list[dict[str, object]]:
+    """Build one completed turn's worth of transcript records."""
+    return [
+        {
+            "schema_version": 1,
+            "session_id": session_id,
+            "timestamp": "2026-03-12T00:00:01+00:00",
+            "type": "user_message",
+            "payload": {"content": user_content},
+        },
+        {
+            "schema_version": 1,
+            "session_id": session_id,
+            "timestamp": "2026-03-12T00:00:02+00:00",
+            "type": "assistant_message",
+            "payload": {"content": assistant_content, "tool_calls": []},
+        },
+        {
+            "schema_version": 1,
+            "session_id": session_id,
+            "timestamp": "2026-03-12T00:00:03+00:00",
+            "type": "turn_finished",
+            "payload": {"iterations": 1, "finish_reason": "stop"},
+        },
+    ]
+
+
 @pytest.fixture
 def project_store(tmp_path: Path) -> tuple[Path, SessionStore]:
     """Create a project directory and SessionStore for testing."""
@@ -317,3 +349,96 @@ def test_session_store_rejects_incomplete_final_turn(
         match=r"incomplete-turn\.jsonl:3 incomplete turn is missing turn_finished",
     ):
         store.load_session(session_id)
+
+
+def test_session_store_migrates_legacy_project_local_sessions(tmp_path: Path) -> None:
+    data_dir = tmp_path / "home-data"
+    cwd = tmp_path / "project"
+    cwd.mkdir()
+    store = SessionStore(cwd, data_dir=data_dir)
+    session_id = "legacy-session"
+
+    legacy_path = _legacy_session_path(cwd, session_id)
+    legacy_path.parent.mkdir(parents=True, exist_ok=True)
+    legacy_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "session_id": session_id,
+                "timestamp": "2026-03-12T00:00:00+00:00",
+                "type": "session_started",
+                "payload": {
+                    "cwd": str(cwd),
+                    "provider_name": "openai",
+                    "model": "gpt-5.4",
+                    "system_prompt": "system",
+                },
+            }
+        )
+        + "\n"
+        + "\n".join(json.dumps(record) for record in _turn_records(session_id, "hello", "world"))
+        + "\n",
+        encoding="utf-8",
+    )
+    (legacy_path.parent / "latest").write_text(f"{session_id}\n", encoding="utf-8")
+
+    assert store.load_latest_session_id() == session_id
+
+    loaded = store.load_session(session_id)
+    migrated_path = _session_path(data_dir, cwd, session_id)
+
+    assert loaded.info.transcript_path == migrated_path
+    assert migrated_path.exists()
+
+    store.append_records(
+        loaded.info,
+        _turn_records(session_id, "again", "done"),
+        update_latest=True,
+    )
+
+    reloaded = store.load_session(session_id)
+    user_messages = [message.content for message in reloaded.context.history if message.role == "user"]
+
+    assert user_messages == ["hello", "again"]
+    assert store.load_latest_session_id() == session_id
+
+
+def test_session_store_loads_session_id_from_any_bucket(tmp_path: Path) -> None:
+    data_dir = tmp_path / "home-data"
+    cwd_one = tmp_path / "project-one"
+    cwd_two = tmp_path / "project-two"
+    cwd_one.mkdir()
+    cwd_two.mkdir()
+
+    store_one = SessionStore(cwd_one, data_dir=data_dir)
+    info = store_one.start_session(
+        provider_name="openai",
+        model="gpt-5.4",
+        api_base=None,
+        temperature=0.0,
+        max_tokens=None,
+        system_prompt="system",
+    )
+    store_one.append_records(
+        info,
+        _turn_records(info.session_id, "first", "reply"),
+        update_latest=True,
+    )
+
+    store_two = SessionStore(cwd_two, data_dir=data_dir)
+    loaded = store_two.load_session(info.session_id)
+
+    assert loaded.info.cwd == str(cwd_one)
+    assert loaded.info.transcript_path == _session_path(data_dir, cwd_one, info.session_id)
+
+    store_two.append_records(
+        loaded.info,
+        _turn_records(info.session_id, "second", "follow-up"),
+        update_latest=True,
+    )
+
+    reloaded = store_one.load_session(info.session_id)
+    user_messages = [message.content for message in reloaded.context.history if message.role == "user"]
+
+    assert user_messages == ["first", "second"]
+    assert store_one.load_latest_session_id() == info.session_id
