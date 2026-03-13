@@ -34,6 +34,20 @@ def _resolve_workspace_path(path_str: str, cwd: Path) -> Path:
     return resolved
 
 
+def _resolve_workspace_member(path: Path, cwd: Path) -> Path | None:
+    """Resolve a discovered filesystem entry and reject escapes.
+
+    Unlike lexical relative-path checks, this follows symlinks so callers can
+    skip entries whose resolved targets leave the workspace.
+    """
+    try:
+        resolved = path.resolve()
+        resolved.relative_to(cwd.resolve())
+    except (OSError, RuntimeError, ValueError):
+        return None
+    return resolved
+
+
 def _is_text_file(path: Path) -> bool:
     """Check if a file appears to be a text file by reading a sample."""
     try:
@@ -207,14 +221,17 @@ class GlobTool(Tool):
         try:
             matches = []
             for path in cwd_resolved.rglob(pattern):
-                if path.is_file():
-                    try:
-                        rel_path = path.relative_to(cwd_resolved)
-                        matches.append(str(rel_path))
-                        if len(matches) >= limit:
-                            break
-                    except ValueError:
-                        pass  # Skip files outside workspace
+                resolved_path = _resolve_workspace_member(path, cwd_resolved)
+                if resolved_path is None or not resolved_path.is_file():
+                    continue
+
+                try:
+                    rel_path = path.relative_to(cwd_resolved)
+                    matches.append(str(rel_path))
+                    if len(matches) >= limit:
+                        break
+                except ValueError:
+                    pass  # Skip files outside workspace
 
             truncated = len(matches) >= limit
 
@@ -287,16 +304,13 @@ class GrepTool(Tool):
         matches = []
 
         try:
-            # Collect files to search
-            if glob_pattern:
-                files = list(cwd_resolved.rglob(glob_pattern))
-            else:
-                files = list(cwd_resolved.rglob("*"))
+            file_iter = cwd_resolved.rglob(glob_pattern or "*")
 
-            for file_path in files:
-                if not file_path.is_file():
+            for file_path in file_iter:
+                resolved_file = _resolve_workspace_member(file_path, cwd_resolved)
+                if resolved_file is None or not resolved_file.is_file():
                     continue
-                if not _is_text_file(file_path):
+                if not _is_text_file(resolved_file):
                     continue
 
                 try:
@@ -305,7 +319,7 @@ class GrepTool(Tool):
                     continue  # Skip files outside workspace
 
                 try:
-                    content = file_path.read_text(encoding="utf-8", errors="replace")
+                    content = resolved_file.read_text(encoding="utf-8", errors="replace")
                     lines = content.splitlines()
 
                     for line_num, line in enumerate(lines, start=1):

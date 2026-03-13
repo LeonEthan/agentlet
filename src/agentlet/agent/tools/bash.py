@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""Bash tool for running terminal commands within the workspace."""
+"""Bash tool for running terminal commands starting from the workspace."""
 
 import asyncio
 import time
@@ -12,7 +12,7 @@ from agentlet.agent.tools.registry import Tool, ToolSpec, ToolExecutionError, bu
 
 
 class BashTool(Tool):
-    """Run terminal commands within the workspace (policy-gated).
+    """Run terminal commands from the workspace starting directory.
 
     Key distinction: non-zero exit code is a successful tool call, not a ToolExecutionError.
     Only invalid arguments, timeout, or policy denial should raise ToolExecutionError.
@@ -26,7 +26,8 @@ class BashTool(Tool):
         return ToolSpec(
             name="bash",
             description=(
-                "Run a terminal command in the workspace. "
+                "Run a terminal command starting in the workspace cwd. "
+                "Commands are not sandboxed and run with the current user's permissions. "
                 "Returns exit code, stdout, and stderr. "
                 "Commands with non-zero exit codes are still successful tool calls."
             ),
