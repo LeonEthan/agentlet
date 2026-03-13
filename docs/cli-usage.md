@@ -36,7 +36,7 @@ agentlet init [options]
 | `--api-key` | API key for the provider | `sk-...` |
 | `--api-base` | Base URL for API requests | `https://api.openai.com/v1` |
 | `--provider` | Provider name | `openai`, `anthropic`, `azure` |
-| `--model` | Model identifier | `gpt-4o-mini`, `claude-3-5-sonnet` |
+| `--model` | Model identifier | `gpt-5.4`, `claude-3-5-sonnet` |
 | `--temperature` | Sampling temperature | `0.0` to `1.0` |
 | `--max-tokens` | Maximum tokens per response | `4096` |
 | `--force` | Overwrite existing settings | - |
@@ -46,7 +46,7 @@ agentlet init [options]
 ```json
 {
   "provider": "openai",
-  "model": "gpt-4o-mini",
+  "model": "gpt-5.4",
   "api_key": "sk-...",
   "api_base": "https://api.openai.com/v1",
   "temperature": 0.0,
@@ -100,7 +100,7 @@ Agentlet follows LiteLLM's standard environment variable naming:
 agentlet init \
   --api-key $OPENAI_API_KEY \
   --api-base https://api.openai.com/v1 \
-  --model gpt-4o-mini
+  --model gpt-5.4
 ```
 
 **Environment fallback:** `OPENAI_API_KEY`, `OPENAI_BASE_URL`
@@ -178,7 +178,7 @@ Initialize or update the settings file.
 
 ```bash
 # Create new settings (fails if exists)
-agentlet init --api-key sk-... --model gpt-4o-mini
+agentlet init --api-key sk-... --model gpt-5.4
 
 # Update existing settings
 agentlet init --api-key sk-... --force

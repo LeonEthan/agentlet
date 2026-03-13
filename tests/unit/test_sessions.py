@@ -39,7 +39,7 @@ def test_session_store_round_trips_completed_turns(project_store: tuple[Path, Se
     cwd, store = project_store
     info = store.start_session(
         provider_name="openai",
-        model="gpt-4o-mini",
+        model="gpt-5.4",
         api_base="http://localhost:4000/v1",
         temperature=0.7,
         max_tokens=256,
@@ -116,7 +116,7 @@ def test_session_store_updates_latest_only_after_first_completed_turn(
     _, store = project_store
     info = store.start_session(
         provider_name="openai",
-        model="gpt-4o-mini",
+        model="gpt-5.4",
         api_base=None,
         temperature=0.0,
         max_tokens=None,
@@ -167,7 +167,7 @@ def test_session_store_reports_malformed_json_with_line_number(
                 "payload": {
                     "cwd": str(cwd),
                     "provider_name": "openai",
-                    "model": "gpt-4o-mini",
+                    "model": "gpt-5.4",
                     "system_prompt": "system",
                 },
             }
@@ -199,7 +199,7 @@ def test_session_store_reports_missing_system_prompt_in_header(
                 "payload": {
                     "cwd": str(cwd),
                     "provider_name": "openai",
-                    "model": "gpt-4o-mini",
+                    "model": "gpt-5.4",
                 },
             }
         )
@@ -229,7 +229,7 @@ def test_session_store_reports_non_list_tool_calls(
                 "payload": {
                     "cwd": str(cwd),
                     "provider_name": "openai",
-                    "model": "gpt-4o-mini",
+                    "model": "gpt-5.4",
                     "system_prompt": "system",
                 },
             }
@@ -283,7 +283,7 @@ def test_session_store_rejects_incomplete_final_turn(
                 "payload": {
                     "cwd": str(cwd),
                     "provider_name": "openai",
-                    "model": "gpt-4o-mini",
+                    "model": "gpt-5.4",
                     "system_prompt": "system",
                 },
             }

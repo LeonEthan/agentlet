@@ -308,7 +308,7 @@ uv run python -m agentlet.cli.main init --api-key your_api_key
 and:
 
 ```bash
-uv run python -m agentlet.cli.main chat --model gpt-4o-mini
+uv run python -m agentlet.cli.main chat --model gpt-5.4
 ```
 
 Behavior:

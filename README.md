@@ -30,7 +30,7 @@ Run `agentlet init` to create your settings file:
 agentlet init \
   --api-key your_api_key \
   --api-base https://api.openai.com/v1 \
-  --model gpt-4o-mini
+  --model gpt-5.4
 
 # Or use environment variables temporarily
 export OPENAI_API_KEY=your_api_key
@@ -61,7 +61,7 @@ The `agentlet init` command creates `~/.agentlet/settings.json`:
 ```json
 {
   "provider": "openai",
-  "model": "gpt-4o-mini",
+  "model": "gpt-5.4",
   "api_key": "your_api_key",
   "api_base": "https://api.openai.com/v1",
   "temperature": 0.0,
@@ -80,7 +80,7 @@ Settings are resolved in this priority order (highest first):
 | Setting | Environment Variable | Default |
 |---------|---------------------|---------|
 | provider | `AGENTLET_PROVIDER` | `openai` |
-| model | `AGENTLET_MODEL` | `gpt-4o-mini` |
+| model | `AGENTLET_MODEL` | `gpt-5.4` |
 | api_key | `AGENTLET_API_KEY` → `{PROVIDER}_API_KEY` → `OPENAI_API_KEY` | - |
 | api_base | `AGENTLET_BASE_URL` → `{PROVIDER}_BASE_URL` → `OPENAI_BASE_URL` | - |
 | temperature | - | `0.0` |

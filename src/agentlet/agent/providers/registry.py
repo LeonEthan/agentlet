@@ -40,7 +40,7 @@ class ProviderStreamEvent:
 
 # Default provider configuration values
 DEFAULT_PROVIDER: str = "openai"
-DEFAULT_MODEL: str = "gpt-4o-mini"
+DEFAULT_MODEL: str = "gpt-5.4"
 DEFAULT_TEMPERATURE: float = 0.0
 
 

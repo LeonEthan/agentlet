@@ -145,7 +145,7 @@ Configuration follows a layered approach:
 
 1. **Environment variables** (highest priority) - for temporary overrides and CI/CD
 2. **Settings file** (`~/.agentlet/settings.json`) - for persistent personal defaults
-3. **Built-in defaults** (lowest priority) - `openai` provider, `gpt-4o-mini` model
+3. **Built-in defaults** (lowest priority) - `openai` provider, `gpt-5.4` model
 
 The `agentlet init` command creates the settings file interactively or via CLI flags:
 
@@ -153,7 +153,7 @@ The `agentlet init` command creates the settings file interactively or via CLI f
 agentlet init \
   --provider openai \
   --api-key $OPENAI_API_KEY \
-  --model gpt-4o-mini \
+  --model gpt-5.4 \
   --temperature 0.0
 ```
 
