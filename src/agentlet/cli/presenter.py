@@ -39,15 +39,12 @@ class ChatPresenter:
         provider_name: str,
         model: str,
         cwd: Path,
-        resumed: bool,
     ) -> None:
-        status = "resumed" if resumed else "new"
         rows = [
             ("provider", provider_name),
             ("model", model),
             ("cwd", str(cwd)),
             ("session", session_id),
-            ("mode", status),
             ("hint", "/help for commands"),
         ]
         self._build_info_table(rows, title="agentlet chat", style="blue")

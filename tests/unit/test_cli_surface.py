@@ -9,7 +9,7 @@ from agentlet.agent.agent_loop import TurnEvent
 from agentlet.agent.context import Message, ToolCall, ToolResult
 from agentlet.agent.providers.registry import DEFAULT_MODEL, ProviderRegistryError
 from agentlet.cli.main import build_parser
-from agentlet.cli.chat_app import ChatCLIError, run_chat_command, _resolve_chat_mode
+from agentlet.cli.chat_app import ChatCLIError, run_chat_command, _resolve_chat_mode, _settings_from_args
 from agentlet.cli.commands import CommandError, parse_command, summarize_history
 from agentlet.cli.presenter import ChatPresenter
 from agentlet.settings import AgentletSettings
@@ -46,9 +46,6 @@ def test_resolve_chat_mode_rejects_print_mode_on_interactive_tty_without_message
     args = SimpleNamespace(
         message=None,
         print_mode=True,
-        continue_session=False,
-        session_id=None,
-        new_session=False,
     )
 
     with pytest.raises(
@@ -58,55 +55,29 @@ def test_resolve_chat_mode_rejects_print_mode_on_interactive_tty_without_message
         _resolve_chat_mode(args, stdin=StringIO(""), stdin_isatty=True)
 
 
-def test_resolve_chat_mode_rejects_session_flags_with_message() -> None:
-    args = SimpleNamespace(
-        message="hello",
-        print_mode=False,
-        continue_session=True,
-        session_id=None,
-        new_session=False,
-    )
-
-    with pytest.raises(
-        ChatCLIError,
-        match="Session flags cannot be combined with a one-shot message",
-    ):
-        _resolve_chat_mode(args, stdin=StringIO(""), stdin_isatty=True)
-
-
-def test_resolve_chat_mode_rejects_session_flags_without_tty() -> None:
-    args = SimpleNamespace(
-        message=None,
-        print_mode=False,
-        continue_session=True,
-        session_id=None,
-        new_session=False,
-    )
-
-    with pytest.raises(ChatCLIError, match="Session flags require an interactive TTY"):
-        _resolve_chat_mode(args, stdin=StringIO("hello"), stdin_isatty=False)
-
-
-def test_build_parser_accepts_resume_and_override_flags() -> None:
+def test_build_parser_rejects_removed_flags() -> None:
     parser = build_parser(AgentletSettings(provider="openai", model="gpt-5.4"))
 
-    parsed = parser.parse_args(
-        [
-            "chat",
-            "--continue",
-            "--provider",
-            "anthropic",
-            "--model",
-            "claude-3-5-sonnet",
-            "--api-key",
-            "test-key",
-        ]
-    )
+    with pytest.raises(SystemExit):
+        parser.parse_args(["chat", "--continue"])
 
-    assert parsed.continue_session is True
-    assert parsed.provider == "anthropic"
-    assert parsed.model == "claude-3-5-sonnet"
-    assert parsed.api_key == "test-key"
+    with pytest.raises(SystemExit):
+        parser.parse_args(["chat", "--session", "session-123"])
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["chat", "--new-session"])
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["chat", "--api-key", "test-key"])
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["chat", "--api-base", "http://localhost:4000/v1"])
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["init", "--api-key", "test-key"])
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["init", "--api-base", "http://localhost:4000/v1"])
 
 
 def test_parse_command_rejects_arguments() -> None:
@@ -149,3 +120,40 @@ def test_presenter_renders_tool_activity_lines() -> None:
     rendered = output.getvalue()
     assert "tool start" in rendered
     assert "tool done" in rendered
+
+
+def _make_openai_settings(**overrides) -> AgentletSettings:
+    """Build AgentletSettings with OpenAI defaults for testing."""
+    defaults = {
+        "provider": "openai",
+        "model": "gpt-4",
+        "api_key": "sk-openai-key",
+        "api_base": "https://api.openai.com/v1",
+    }
+    defaults.update(overrides)
+    return AgentletSettings(**defaults)
+
+
+def test_settings_from_args_inherits_api_credentials_when_provider_matches() -> None:
+    """When provider matches stored settings, api_key/api_base are inherited."""
+    fallback = _make_openai_settings()
+    args = make_cli_args()  # provider=None, uses fallback
+
+    result = _settings_from_args(args, fallback=fallback)
+
+    assert result.provider == "openai"
+    assert result.api_key == "sk-openai-key"
+    assert result.api_base == "https://api.openai.com/v1"
+
+
+def test_settings_from_args_clears_api_credentials_when_provider_overridden() -> None:
+    """When provider is overridden via CLI, api_key/api_base are cleared to None."""
+    fallback = _make_openai_settings()
+    args = make_cli_args(provider="anthropic", model="claude-3-sonnet")
+
+    result = _settings_from_args(args, fallback=fallback)
+
+    assert result.provider == "anthropic"
+    assert result.model == "claude-3-sonnet"
+    assert result.api_key is None  # Cleared, not inherited
+    assert result.api_base is None  # Cleared, not inherited

@@ -74,6 +74,33 @@ def test_litellm_provider_builds_request_and_normalizes_dict_response() -> None:
     assert response.usage.total_tokens == 3
 
 
+def test_litellm_provider_includes_explicit_null_auth_fields_when_unset() -> None:
+    captured: dict[str, object] = {}
+
+    async def fake_completion(**kwargs):
+        captured.update(kwargs)
+        return {
+            "choices": [
+                {
+                    "message": {"role": "assistant", "content": "hello"},
+                    "finish_reason": "stop",
+                }
+            ]
+        }
+
+    provider = LiteLLMProvider(
+        ProviderConfig(model="gpt-5.4"),
+        completion_func=fake_completion,
+    )
+
+    asyncio.run(provider.complete([Message(role="user", content="hello")]))
+
+    assert "api_key" in captured
+    assert "api_base" in captured
+    assert captured["api_key"] is None
+    assert captured["api_base"] is None
+
+
 def test_litellm_provider_normalizes_tool_calls_from_object_response() -> None:
     async def fake_completion(**kwargs):
         return SimpleNamespace(

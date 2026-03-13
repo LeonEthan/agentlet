@@ -28,7 +28,6 @@ def run_repl(
     session_store: SessionStore,
     cwd: Path,
     loaded_session: LoadedSession,
-    resumed: bool,
 ) -> int:
     """Run the interactive chat loop until the user exits."""
     current_session = loaded_session.info
@@ -39,7 +38,6 @@ def run_repl(
         provider_name=current_session.provider_name,
         model=current_session.model,
         cwd=cwd,
-        resumed=resumed,
     )
 
     last_idle_interrupt = 0.0
@@ -104,7 +102,6 @@ def run_repl(
                     provider_name=current_session.provider_name,
                     model=current_session.model,
                     cwd=cwd,
-                    resumed=False,
                 )
                 continue
             if command == "exit":

@@ -33,12 +33,6 @@ def build_parser(defaults: AgentletSettings) -> argparse.ArgumentParser:
     )
     init.add_argument("--provider", default=defaults.provider, help="Provider name to store.")
     init.add_argument("--model", default=defaults.model, help="Model name to store.")
-    init.add_argument("--api-key", default=defaults.api_key, help="Provider API key to store.")
-    init.add_argument(
-        "--api-base",
-        default=defaults.api_base,
-        help="Optional OpenAI-compatible base URL to store.",
-    )
     init.add_argument(
         "--temperature",
         type=float,
@@ -59,24 +53,6 @@ def build_parser(defaults: AgentletSettings) -> argparse.ArgumentParser:
 
     chat = subparsers.add_parser("chat", help="Run agentlet chat in one-shot or interactive mode.")
     chat.add_argument("message", nargs="?", help="User message. Reads from stdin when omitted.")
-    mode_group = chat.add_mutually_exclusive_group()
-    mode_group.add_argument(
-        "--continue",
-        dest="continue_session",
-        action="store_true",
-        help="Resume the latest interactive session in the current working directory.",
-    )
-    mode_group.add_argument(
-        "--session",
-        dest="session_id",
-        help="Resume a specific interactive session by id.",
-    )
-    mode_group.add_argument(
-        "--new-session",
-        dest="new_session",
-        action="store_true",
-        help="Force a fresh interactive session.",
-    )
     chat.add_argument(
         "--print",
         dest="print_mode",
@@ -88,16 +64,6 @@ def build_parser(defaults: AgentletSettings) -> argparse.ArgumentParser:
         "--model",
         default=defaults.model,
         help="Model name.",
-    )
-    chat.add_argument(
-        "--api-key",
-        default=defaults.api_key,
-        help="Provider API key.",
-    )
-    chat.add_argument(
-        "--api-base",
-        default=defaults.api_base,
-        help="Optional OpenAI-compatible base URL.",
     )
     chat.add_argument(
         "--temperature",
@@ -112,6 +78,17 @@ def build_parser(defaults: AgentletSettings) -> argparse.ArgumentParser:
         help="Optional max_tokens override.",
     )
     return parser
+
+
+def _provider_change_preserves_sensitive_settings(
+    *,
+    stored_settings: AgentletSettings,
+    next_provider: str | None,
+) -> bool:
+    if not (stored_settings.api_key or stored_settings.api_base):
+        return False
+    previous_provider = resolve_settings_defaults(stored_settings).provider
+    return previous_provider != next_provider
 
 
 def main(argv: list[str] | None = None, *, home_dir: Path | None = None) -> int:
@@ -131,13 +108,21 @@ def main(argv: list[str] | None = None, *, home_dir: Path | None = None) -> int:
     args = parser.parse_args(raw_argv)
 
     if args.command == "init":
+        if _provider_change_preserves_sensitive_settings(
+            stored_settings=stored_settings,
+            next_provider=args.provider,
+        ):
+            parser.error(
+                "Changing provider with stored api_key/api_base is not supported via CLI. "
+                "Edit ~/.agentlet/settings.json manually to update or clear sensitive fields."
+            )
         try:
             written_path = write_settings(
                 AgentletSettings(
                     provider=args.provider,
                     model=args.model,
-                    api_key=args.api_key,
-                    api_base=args.api_base,
+                    api_key=stored_settings.api_key,
+                    api_base=stored_settings.api_base,
                     temperature=args.temperature,
                     max_tokens=args.max_tokens,
                 ),

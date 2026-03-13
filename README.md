@@ -8,7 +8,7 @@ Current phase:
 
 - single-process agent loop with tool support
 - interactive TTY chat with streaming output
-- resumable cwd-scoped sessions under `~/.agentlet/sessions/` (grouped by working directory hash)
+- persisted cwd-scoped session transcripts under `~/.agentlet/sessions/` (grouped by working directory hash)
 - independent `Context`
 - `LiteLLM` provider integration
 - user-level `~/.agentlet/settings.json` defaults for local testing
@@ -28,14 +28,10 @@ Run `agentlet init` to create your settings file:
 ```bash
 # OpenAI (default)
 agentlet init \
-  --api-key your_api_key \
-  --api-base https://api.openai.com/v1 \
   --model gpt-5.4
-
-# Or use environment variables temporarily
-export OPENAI_API_KEY=your_api_key
-agentlet chat "Hello"
 ```
+
+Then edit `~/.agentlet/settings.json` to add `api_key` and `api_base` when your provider requires them.
 
 See [Configuration Guide](#configuration) below for more providers.
 
@@ -73,18 +69,17 @@ The `agentlet init` command creates `~/.agentlet/settings.json`:
 
 Settings are resolved in this priority order (highest first):
 
-1. **Environment variables** (temporary overrides)
-2. **Settings file** (`~/.agentlet/settings.json`)
-3. **Built-in defaults**
+1. **Settings file** (`~/.agentlet/settings.json`)
+2. **Built-in defaults**
 
-| Setting | Environment Variable | Default |
-|---------|---------------------|---------|
-| provider | `AGENTLET_PROVIDER` | `openai` |
-| model | `AGENTLET_MODEL` | `gpt-5.4` |
-| api_key | `AGENTLET_API_KEY` → `{PROVIDER}_API_KEY` → `OPENAI_API_KEY` | - |
-| api_base | `AGENTLET_BASE_URL` → `{PROVIDER}_BASE_URL` → `OPENAI_BASE_URL` | - |
-| temperature | - | `0.0` |
-| max_tokens | - | `null` |
+| Setting | Default |
+|---------|---------|
+| provider | `openai` |
+| model | `gpt-5.4` |
+| api_key | - |
+| api_base | - |
+| temperature | `0.0` |
+| max_tokens | `null` |
 
 ### Provider Examples
 
@@ -93,7 +88,6 @@ Settings are resolved in this priority order (highest first):
 ```bash
 agentlet init \
   --provider anthropic \
-  --api-key $ANTHROPIC_API_KEY \
   --model claude-3-5-sonnet-20241022
 ```
 
@@ -101,8 +95,7 @@ agentlet init \
 
 ```bash
 agentlet init \
-  --api-key $DEEPSEEK_API_KEY \
-  --api-base https://api.deepseek.com/v1 \
+  --provider openai \
   --model deepseek/deepseek-chat
 ```
 
@@ -111,8 +104,7 @@ agentlet init \
 ```bash
 agentlet init \
   --provider azure \
-  --api-key $AZURE_API_KEY \
-  --api-base https://your-resource.openai.azure.com/
+  --model gpt-5.4
 ```
 
 #### Google Gemini
@@ -120,7 +112,6 @@ agentlet init \
 ```bash
 agentlet init \
   --provider gemini \
-  --api-key $GEMINI_API_KEY \
   --model gemini/gemini-1.5-flash
 ```
 
@@ -129,7 +120,6 @@ agentlet init \
 ```bash
 agentlet init \
   --provider groq \
-  --api-key $GROQ_API_KEY \
   --model groq/llama-3.1-70b-versatile
 ```
 
@@ -138,8 +128,7 @@ agentlet init \
 ```bash
 agentlet init \
   --provider together_ai \
-  --api-key $TOGETHERAI_API_KEY \
-  --api-base https://api.together.xyz/v1
+  --model together_ai/llama-3.1-70b
 ```
 
 ## CLI Usage
@@ -200,15 +189,13 @@ Sessions are automatically persisted to `~/.agentlet/sessions/{cwd_hash}/`:
 ```bash
 # List your sessions (manual - files are in ~/.agentlet/sessions/)
 ls ~/.agentlet/sessions/*/
-
-# Find session ID from latest pointer
-cat ~/.agentlet/sessions/$(echo -n $(pwd) | md5 | cut -c1-16)/latest
 ```
 
 Session behavior:
 - Each working directory has isolated sessions (identified by path hash)
 - Only completed turns are persisted (cancelled/failed turns are discarded)
 - Session headers store non-sensitive settings (model, temperature, etc.)
+- Each `agentlet chat` launch starts a fresh interactive session
 - History is global at `~/.agentlet/history`
 
 ## Development
@@ -266,4 +253,4 @@ agentlet/
 - SOCKS proxy support is included through `httpx[socks]`
 - `LiteLLM` may require provider-prefixed model names for some backends
 - Interactive sessions persist only completed turns; cancelled or failed turns are not committed
-- Session headers persist non-sensitive provider settings so resumed chats keep the same model endpoint and sampling limits
+- Session headers persist non-sensitive provider settings for transcript inspection and debugging

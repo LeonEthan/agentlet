@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -20,29 +19,6 @@ SETTINGS_FILENAME = "settings.json"
 SETTINGS_FILENAME_LEGACY = "setting.json"
 
 _STRING_FIELDS = {"provider", "model", "api_key", "api_base"}
-
-# Provider to environment variable mappings (LiteLLM standard)
-_PROVIDER_API_KEY_ENVS: dict[str, str] = {
-    "openai": "OPENAI_API_KEY",
-    "anthropic": "ANTHROPIC_API_KEY",
-    "azure": "AZURE_API_KEY",
-    "gemini": "GEMINI_API_KEY",
-    "cohere": "COHERE_API_KEY",
-    "together_ai": "TOGETHERAI_API_KEY",
-    "groq": "GROQ_API_KEY",
-    "mistral": "MISTRAL_API_KEY",
-    "fireworks": "FIREWORKS_API_KEY",
-    "anyscale": "ANYSCALE_API_KEY",
-}
-
-_PROVIDER_BASE_URL_ENVS: dict[str, str] = {
-    "openai": "OPENAI_BASE_URL",
-    "anthropic": "ANTHROPIC_BASE_URL",
-    "azure": "AZURE_API_BASE",
-    "together_ai": "TOGETHERAI_BASE_URL",
-    "fireworks": "FIREWORKS_BASE_URL",
-    "anyscale": "ANYSCALE_BASE_URL",
-}
 _FLOAT_FIELDS = {"temperature"}
 _INT_FIELDS = {"max_tokens"}
 _ALLOWED_FIELDS = _STRING_FIELDS | _FLOAT_FIELDS | _INT_FIELDS
@@ -169,83 +145,13 @@ def load_settings(settings_path: Path | None = None) -> AgentletSettings:
         return _load_flat_settings(payload, path)
 
 
-def _resolve_provider_env(
-    env_values: Mapping[str, str],
-    stored_value: str | None,
-    provider: str | None,
-    *,
-    override_env: str,
-    fallback_env: str,
-    provider_mapping: dict[str, str],
-) -> str | None:
-    """Resolve a provider-specific env var with LiteLLM-standard fallback chain.
-
-    Priority (highest to lowest):
-    1. override_env (project-specific override, e.g., AGENTLET_API_KEY)
-    2. {PROVIDER}_ENV (LiteLLM standard from provider_mapping)
-    3. fallback_env (backward compatibility, e.g., OPENAI_API_KEY)
-    4. stored_value from settings.json
-    5. None
-    """
-    # 1. Project-specific override
-    if override_env in env_values:
-        return env_values[override_env]
-
-    # 2. Provider-specific LiteLLM standard (provider is already normalized)
-    if provider:
-        provider_env = provider_mapping.get(provider)
-        if provider_env and provider_env in env_values:
-            return env_values[provider_env]
-
-    # 3. Backward compatibility
-    if fallback_env in env_values:
-        return env_values[fallback_env]
-
-    return stored_value
-
-
-def resolve_settings_defaults(
-    stored_settings: AgentletSettings,
-    *,
-    env: Mapping[str, str] | None = None,
-) -> AgentletSettings:
-    """Resolve the effective CLI defaults from env vars and stored settings."""
-    env_values = env if env is not None else os.environ
-
-    # Resolve provider first, as it's needed for API key/base resolution
-    provider = _resolve_string_env(
-        env_values,
-        "AGENTLET_PROVIDER",
-        stored_settings.provider,
-        DEFAULT_PROVIDER,
-    )
-    # Normalize provider once for efficient lookup (all mapping keys are lowercase)
-    normalized_provider = provider.lower() if provider else None
-
+def resolve_settings_defaults(stored_settings: AgentletSettings) -> AgentletSettings:
+    """Resolve the effective CLI defaults from stored settings and built-ins."""
     return AgentletSettings(
-        provider=provider,
-        model=_resolve_string_env(
-            env_values,
-            "AGENTLET_MODEL",
-            stored_settings.model,
-            DEFAULT_MODEL,
-        ),
-        api_key=_resolve_provider_env(
-            env_values,
-            stored_settings.api_key,
-            normalized_provider,
-            override_env="AGENTLET_API_KEY",
-            fallback_env="OPENAI_API_KEY",
-            provider_mapping=_PROVIDER_API_KEY_ENVS,
-        ),
-        api_base=_resolve_provider_env(
-            env_values,
-            stored_settings.api_base,
-            normalized_provider,
-            override_env="AGENTLET_BASE_URL",
-            fallback_env="OPENAI_BASE_URL",
-            provider_mapping=_PROVIDER_BASE_URL_ENVS,
-        ),
+        provider=stored_settings.provider or DEFAULT_PROVIDER,
+        model=stored_settings.model or DEFAULT_MODEL,
+        api_key=stored_settings.api_key,
+        api_base=stored_settings.api_base,
         temperature=stored_settings.temperature
         if stored_settings.temperature is not None
         else DEFAULT_TEMPERATURE,
@@ -300,16 +206,3 @@ def _validate_int_field(payload: dict[str, Any], key: str, path: Path) -> int | 
     if isinstance(value, bool) or not isinstance(value, int):
         raise SettingsError(f"Settings key `{key}` in {path} must be an integer or null.")
     return value
-
-
-def _resolve_string_env(
-    env_values: Mapping[str, str],
-    env_name: str,
-    stored_value: str | None,
-    fallback: str | None,
-) -> str | None:
-    if env_name in env_values:
-        return env_values[env_name]
-    if stored_value is not None:
-        return stored_value
-    return fallback

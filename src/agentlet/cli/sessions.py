@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""Interactive session persistence and resume helpers."""
+"""Interactive session persistence and transcript loading helpers."""
 
 import hashlib
 import json
@@ -41,7 +41,7 @@ SCHEMA_VERSION = 1
 
 
 class SessionError(RuntimeError):
-    """Raised when session persistence or resume cannot proceed."""
+    """Raised when session persistence or transcript loading cannot proceed."""
 
 
 class SessionNotFoundError(SessionError):
@@ -65,7 +65,7 @@ class SessionInfo:
 
 @dataclass(frozen=True)
 class LoadedSession:
-    """A resumed session and its reconstructed context."""
+    """A loaded session and its reconstructed context."""
 
     info: SessionInfo
     context: Context
@@ -627,18 +627,3 @@ def _utc_timestamp() -> str:
 def _generate_session_id() -> str:
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     return f"{timestamp}-{secrets.token_hex(4)}"
-
-
-def load_session_for_resume(
-    session_store: SessionStore,
-    *,
-    continue_session: bool,
-    session_id: str | None,
-) -> LoadedSession | None:
-    """Resolve the requested interactive session to resume, if any."""
-    if session_id is not None:
-        return session_store.load_session(session_id)
-    if continue_session:
-        return session_store.load_session(session_store.load_latest_session_id())
-    return None
-

@@ -16,7 +16,7 @@ The target is not a visual clone of Claude Code. The target is the same operatio
 
 - interactive multi-turn chat by default in a TTY
 - obvious one-shot print mode for scripting
-- resumable sessions
+- persisted session transcripts
 - clear visibility into assistant progress and tool activity
 - enough ergonomics that a human can stay in the loop for a long session without fighting the terminal
 
@@ -26,7 +26,7 @@ Phase 2 must deliver:
 
 1. A real interactive REPL on top of the existing runtime.
 2. Streaming assistant output in the terminal.
-3. Session persistence and resume within the current working directory.
+3. Session persistence within the current working directory.
 4. Better terminal ergonomics:
    - multiline input
    - local history
@@ -83,13 +83,13 @@ It is not the best default for this phase because:
 
 ### 4.4 Claude Code interaction patterns
 
-Claude Code documentation emphasizes an interactive terminal workflow, a print-oriented non-interactive path, and conversation continuation/resume. Those patterns map directly to what `agentlet` now needs for manual evaluation.
+Claude Code documentation emphasizes an interactive terminal workflow, a print-oriented non-interactive path, and conversation continuity. Those patterns map directly to what `agentlet` now needs for manual evaluation.
 
 The useful takeaway is product shape, not feature parity:
 
 - interactive mode for humans
 - print mode for scripts
-- session continuity
+- session persistence
 - terminal-visible progress
 
 ## 5. Technology Decision
@@ -125,9 +125,6 @@ Phase 2 should preserve the current `chat` command while expanding its behavior:
 ```bash
 agentlet chat "hello"                 # one-shot, existing behavior
 agentlet chat                         # interactive when stdin is a TTY
-agentlet chat --continue              # resume latest session in cwd
-agentlet chat --session <session-id>  # resume a specific session
-agentlet chat --new-session           # force a fresh interactive session
 agentlet chat --print "hello"         # explicit one-shot scripting mode
 ```
 
@@ -143,30 +140,19 @@ This keeps phase-1 scripts working while making interactive usage the natural TT
 
 Configuration follows a layered approach:
 
-1. **Environment variables** (highest priority) - for temporary overrides and CI/CD
-2. **Settings file** (`~/.agentlet/settings.json`) - for persistent personal defaults
-3. **Built-in defaults** (lowest priority) - `openai` provider, `gpt-5.4` model
+1. **Settings file** (`~/.agentlet/settings.json`) - for persistent personal defaults
+2. **Built-in defaults** (lowest priority) - `openai` provider, `gpt-5.4` model
 
 The `agentlet init` command creates the settings file interactively or via CLI flags:
 
 ```bash
 agentlet init \
   --provider openai \
-  --api-key $OPENAI_API_KEY \
   --model gpt-5.4 \
   --temperature 0.0
 ```
 
-Environment variables follow LiteLLM's standard naming:
-- Generic: `AGENTLET_API_KEY`, `AGENTLET_MODEL`, `AGENTLET_PROVIDER`
-- Provider-specific: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `AZURE_API_KEY`, etc.
-
-Resolution priority for API keys:
-1. `AGENTLET_API_KEY` (project-specific override)
-2. `{PROVIDER}_API_KEY` (LiteLLM standard)
-3. `OPENAI_API_KEY` (backward compatibility fallback)
-4. Settings file
-5. None (will fail if required)
+Sensitive fields such as `api_key` and `api_base` should be edited directly in `~/.agentlet/settings.json`.
 
 ### 6.2 Interactive behavior
 
@@ -228,7 +214,7 @@ The UI should optimize for long scrollback readability, not visual density.
 Sessions are scoped to the current working directory using a hash-based grouping strategy. Each working directory gets its own isolated session storage under `~/.agentlet/sessions/{cwd_hash}/`. This matches the local-harness usage model while keeping session data centralized in the user's home directory.
 
 The `cwd_hash` is the first 16 characters of the MD5 hash of the resolved working directory path. This provides:
-- Predictable resume behavior within each working directory
+- Predictable transcript grouping within each working directory
 - Isolation between different projects
 - A flat, filesystem-safe directory structure
 
@@ -282,18 +268,17 @@ Each record should include:
 - a stable `type`
 - the normalized payload for that event
 
-`schema_version` should start at `1` and be checked on resume before any transcript replay. If a future version is unsupported, the CLI should fail with a clear message that the session cannot be resumed by the current build.
+`schema_version` should start at `1` and be checked before any transcript replay. If a future version is unsupported, the CLI should fail with a clear message that the transcript cannot be loaded by the current build.
 
-### 7.3 Resume behavior
+### 7.3 Transcript behavior
 
-Resume should rebuild a `Context` from the stored normalized transcript.
+Transcript loading should rebuild a `Context` from the stored normalized transcript when needed for debugging or future tooling.
 
 Rules:
 
-- `--continue` loads the session pointed to by `~/.agentlet/sessions/{cwd_hash}/latest` for the current working directory
-- `--session <id>` loads that specific transcript
-- `--new-session` ignores any previous latest pointer
 - every completed interactive turn appends to the session log and updates `latest`
+- every `agentlet chat` launch starts a fresh interactive session
+- transcript files remain append-only per session id
 
 Phase 2 should fail loudly on malformed session files instead of guessing.
 
@@ -304,7 +289,7 @@ Concurrency rules:
 - `~/.agentlet/sessions/{cwd_hash}/latest` is best-effort metadata; last successful writer wins
 - writes to `latest` should be atomic via write-to-temp then rename
 
-Phase 2 does not need cross-process locking beyond per-session file ownership, because resume targets a specific immutable session id and concurrent sessions do not share a transcript file.
+Phase 2 does not need cross-process locking beyond per-session file ownership, because concurrent sessions do not share a transcript file.
 
 ## 8. Runtime and CLI Architecture
 
@@ -322,14 +307,14 @@ src/agentlet/cli/
 ├── presenter.py       # rich rendering for turn/session events
 ├── prompt.py          # prompt_toolkit session factory and key bindings
 ├── commands.py        # slash-command parsing and dispatch
-└── sessions.py        # JSONL transcript persistence and resume
+└── sessions.py        # JSONL transcript persistence and loading
 ```
 
 This keeps `main.py` small and avoids turning it into a mixed parser/UI/runtime module.
 
 ### 8.2 Reuse `Context` across turns
 
-Phase 2 should keep the existing `Context` model and reuse one context object for an interactive session. That preserves the current architecture and makes session resume a matter of rehydrating normalized messages.
+Phase 2 should keep the existing `Context` model and reuse one context object for an interactive session. That preserves the current architecture and keeps transcript loading as a matter of rehydrating normalized messages.
 
 No terminal code should be added to `Context`.
 
@@ -397,7 +382,7 @@ Rules:
 - provider errors render as visible CLI errors and do not corrupt the active session
 - malformed tool arguments fail the turn clearly
 - failed turn output is rendered, but only successful mutations are committed to the persisted transcript
-- resume errors should tell the user which session file is invalid
+- transcript load errors should tell the user which session file is invalid
 - interrupted turns should be discarded from persisted history unless a future version introduces explicit partial-turn records
 
 The current `AgentLoop` copy-on-success behavior should be preserved for interactive sessions.
@@ -408,7 +393,7 @@ The current `AgentLoop` copy-on-success behavior should be preserved for interac
 
 Add focused tests for:
 
-- session log write and resume reconstruction
+- session log write and transcript reconstruction
 - slash-command parsing
 - CLI mode selection
 - presenter rendering against a captured console
@@ -420,7 +405,7 @@ Add focused tests for:
 Add smoke coverage for:
 
 - one interactive happy path with a fake prompt source and fake provider
-- resume-latest behavior
+- fresh interactive startup behavior
 - tool activity rendering path
 
 These tests should avoid real TTY dependencies where possible by injecting prompt and console abstractions.
@@ -431,7 +416,7 @@ Manual validation should cover:
 
 - long multi-turn session in a real terminal
 - multiline input
-- session resume after process restart
+- transcript inspection after process restart
 - one tool-call round trip with visible progress
 - fallback one-shot scripting path
 
@@ -445,7 +430,7 @@ Recommended order:
 4. Add provider streaming normalization.
 5. Build the interactive REPL with `prompt_toolkit`.
 6. Add `rich` presenter rendering.
-7. Add smoke tests for interactive and resume paths.
+7. Add smoke tests for interactive paths.
 
 This order keeps each step independently testable and avoids coupling the UI build-out to unfinished runtime changes.
 
@@ -455,11 +440,11 @@ Phase 2 is complete when all of the following are true:
 
 - `agentlet chat` supports interactive multi-turn use in a TTY
 - assistant output streams incrementally
-- sessions can be resumed from the current working directory
+- interactive transcripts are persisted per working directory
 - one-shot usage still works for scripts and stdin pipes
 - tool activity is visible in the terminal
 - the runtime remains free of direct `rich` and `prompt_toolkit` imports
-- tests cover interactive mode selection, session resume, and streaming behavior
+- tests cover interactive mode selection, fresh-session startup, and streaming behavior
 
 ## 13. References
 

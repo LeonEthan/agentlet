@@ -8,7 +8,8 @@ Note: This file relies on conftest.py for sys.path setup. Run with:
     uv run python -m pytest tests/test_real_api.py -v
 
 Or after bootstrapping local settings:
-    agentlet init --api-key your_api_key --api-base https://api.openai.com/v1
+    agentlet init --model gpt-5.4
+    # then edit ~/.agentlet/settings.json with api_key/api_base as needed
     uv run python -m pytest tests/test_real_api.py -v
 """
 
@@ -63,9 +64,9 @@ class TestSettingsLoading:
     """Test that local settings are properly loaded."""
 
     def test_api_key_loaded(self):
-        """Verify API key settings are loaded from settings.json or exported env vars."""
+        """Verify API key settings are loaded from settings.json."""
         api_key = _get_env_config().api_key
-        assert api_key, "API key not found in ~/.agentlet/settings.json or exported env vars"
+        assert api_key, "API key not found in ~/.agentlet/settings.json"
         assert len(api_key) > 20, f"API key seems too short: {api_key[:10]}..."
         print(f"\n  API Key: {api_key[:15]}... (length: {len(api_key)})")
 
@@ -79,9 +80,9 @@ class TestSettingsLoading:
             print("\n  Base URL: not configured for this provider")
 
     def test_model_config_loaded(self):
-        """Verify model settings are loaded from settings.json or exported env vars."""
+        """Verify model settings are loaded from settings.json or built-in defaults."""
         model = _get_env_config().model
-        assert model, "Model not found in ~/.agentlet/settings.json or exported env vars"
+        assert model, "Model not found in ~/.agentlet/settings.json or built-in defaults"
         print(f"\n  Model: {model}")
 
 
@@ -317,11 +318,12 @@ class TestErrorHandling:
     @pytest.mark.asyncio
     async def test_invalid_api_key(self):
         """Test behavior with invalid API key."""
+        resolved_settings = resolve_settings_defaults(load_settings())
         config = ProviderConfig(
             name=DEFAULT_PROVIDER,
-            model=os.getenv("AGENTLET_MODEL", DEFAULT_MODEL),
+            model=resolved_settings.model or DEFAULT_MODEL,
             api_key="invalid-key-12345",
-            api_base=os.getenv("OPENAI_BASE_URL"),
+            api_base=resolved_settings.api_base,
         )
         provider = LiteLLMProvider(config)
 

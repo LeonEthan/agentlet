@@ -55,32 +55,24 @@ def test_load_settings_rejects_unknown_keys(tmp_path) -> None:
         load_settings(settings_path)
 
 
-def test_resolve_settings_defaults_prefers_exported_env(monkeypatch) -> None:
-    # Clear any existing env vars first to isolate the test
-    monkeypatch.delenv("AGENTLET_API_KEY", raising=False)
-    monkeypatch.delenv("AGENTLET_BASE_URL", raising=False)
-    monkeypatch.setenv("AGENTLET_PROVIDER", "custom-provider")
-    monkeypatch.setenv("AGENTLET_MODEL", "env-model")
-    monkeypatch.setenv("OPENAI_API_KEY", "env-key")
-    monkeypatch.setenv("OPENAI_BASE_URL", "http://env.example/v1")
-
+def test_resolve_settings_defaults_uses_stored_values_and_built_ins() -> None:
     resolved = resolve_settings_defaults(
         AgentletSettings(
-            provider="file-provider",
-            model="file-model",
+            provider=None,
+            model=None,
             api_key="file-key",
             api_base="http://file.example/v1",
-            temperature=0.4,
+            temperature=None,
             max_tokens=99,
         )
     )
 
     assert resolved == AgentletSettings(
-        provider="custom-provider",
-        model="env-model",
-        api_key="env-key",
-        api_base="http://env.example/v1",
-        temperature=0.4,
+        provider="openai",
+        model="gpt-5.4",
+        api_key="file-key",
+        api_base="http://file.example/v1",
+        temperature=0.0,
         max_tokens=99,
     )
 
@@ -101,10 +93,6 @@ def test_main_init_writes_canonical_settings_file(tmp_path, capsys) -> None:
             "openai",
             "--model",
             "init-model",
-            "--api-key",
-            "init-key",
-            "--api-base",
-            "http://localhost:4000/v1",
             "--temperature",
             "0.3",
             "--max-tokens",
@@ -121,8 +109,8 @@ def test_main_init_writes_canonical_settings_file(tmp_path, capsys) -> None:
     assert json.loads(settings_path.read_text(encoding="utf-8")) == {
         "provider": "openai",
         "model": "init-model",
-        "api_key": "init-key",
-        "api_base": "http://localhost:4000/v1",
+        "api_key": None,
+        "api_base": None,
         "temperature": 0.3,
         "max_tokens": 256,
     }
@@ -139,19 +127,13 @@ def test_main_chat_rejects_invalid_settings_file(tmp_path) -> None:
     assert exc_info.value.code == 2
 
 
-def test_main_init_force_repairs_invalid_settings_file(tmp_path, monkeypatch) -> None:
+def test_main_init_force_repairs_invalid_settings_file(tmp_path) -> None:
     settings_path = default_settings_path(tmp_path)
     settings_path.parent.mkdir(parents=True)
     settings_path.write_text("{not-json}\n", encoding="utf-8")
 
-    # Clear environment variables to ensure test isolation
-    monkeypatch.delenv("AGENTLET_API_KEY", raising=False)
-    monkeypatch.delenv("AGENTLET_BASE_URL", raising=False)
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
-
     exit_code = cli_main.main(
-        ["init", "--force", "--api-key", "fixed-key", "--model", "fixed-model"],
+        ["init", "--force", "--model", "fixed-model"],
         home_dir=tmp_path,
     )
 
@@ -159,14 +141,14 @@ def test_main_init_force_repairs_invalid_settings_file(tmp_path, monkeypatch) ->
     assert json.loads(settings_path.read_text(encoding="utf-8")) == {
         "provider": "openai",
         "model": "fixed-model",
-        "api_key": "fixed-key",
+        "api_key": None,
         "api_base": None,
         "temperature": 0.0,
         "max_tokens": None,
     }
 
 
-def test_main_init_force_migrates_legacy_settings_filename(tmp_path, monkeypatch) -> None:
+def test_main_init_force_migrates_legacy_settings_filename(tmp_path) -> None:
     legacy_path = tmp_path / ".agentlet" / "setting.json"
     legacy_path.parent.mkdir(parents=True)
     legacy_path.write_text(
@@ -184,13 +166,8 @@ def test_main_init_force_migrates_legacy_settings_filename(tmp_path, monkeypatch
         encoding="utf-8",
     )
 
-    monkeypatch.delenv("AGENTLET_API_KEY", raising=False)
-    monkeypatch.delenv("AGENTLET_BASE_URL", raising=False)
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
-
     exit_code = cli_main.main(
-        ["init", "--force", "--api-key", "fixed-key", "--model", "fixed-model"],
+        ["init", "--force", "--model", "fixed-model"],
         home_dir=tmp_path,
     )
 
@@ -202,15 +179,83 @@ def test_main_init_force_migrates_legacy_settings_filename(tmp_path, monkeypatch
     assert json.loads(new_path.read_text(encoding="utf-8")) == {
         "provider": "openai",
         "model": "fixed-model",
-        "api_key": "fixed-key",
+        "api_key": "legacy-key",
         "api_base": "http://legacy.example/v1",
         "temperature": 0.2,
         "max_tokens": 64,
     }
 
 
+def test_main_init_force_preserves_existing_sensitive_settings(tmp_path) -> None:
+    settings_path = default_settings_path(tmp_path)
+    settings_path.parent.mkdir(parents=True)
+    settings_path.write_text(
+        json.dumps(
+            {
+                "provider": "openai",
+                "model": "old-model",
+                "api_key": "stored-key",
+                "api_base": "http://stored.example/v1",
+                "temperature": 0.1,
+                "max_tokens": 32,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    exit_code = cli_main.main(
+        ["init", "--force", "--model", "new-model", "--temperature", "0.8"],
+        home_dir=tmp_path,
+    )
+
+    assert exit_code == 0
+    assert json.loads(settings_path.read_text(encoding="utf-8")) == {
+        "provider": "openai",
+        "model": "new-model",
+        "api_key": "stored-key",
+        "api_base": "http://stored.example/v1",
+        "temperature": 0.8,
+        "max_tokens": 32,
+    }
+
+
+def test_main_init_force_rejects_provider_change_with_stored_sensitive_settings(tmp_path) -> None:
+    settings_path = default_settings_path(tmp_path)
+    settings_path.parent.mkdir(parents=True)
+    settings_path.write_text(
+        json.dumps(
+            {
+                "provider": "openai",
+                "model": "old-model",
+                "api_key": "stored-key",
+                "api_base": "http://stored.example/v1",
+                "temperature": 0.1,
+                "max_tokens": 32,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli_main.main(
+            ["init", "--force", "--provider", "anthropic", "--model", "claude-3-5-sonnet"],
+            home_dir=tmp_path,
+        )
+
+    assert exc_info.value.code == 2
+    assert json.loads(settings_path.read_text(encoding="utf-8")) == {
+        "provider": "openai",
+        "model": "old-model",
+        "api_key": "stored-key",
+        "api_base": "http://stored.example/v1",
+        "temperature": 0.1,
+        "max_tokens": 32,
+    }
+
+
 def test_load_settings_only_defaults_section(tmp_path) -> None:
-    """Test loading settings with only defaults section (no env)."""
     settings_path = default_settings_path(tmp_path)
     settings_path.parent.mkdir(parents=True)
     settings_path.write_text(
@@ -232,108 +277,32 @@ def test_load_settings_only_defaults_section(tmp_path) -> None:
     assert loaded.model == "claude-3"
 
 
-def test_resolve_settings_defaults_agentlet_api_key_precedence(monkeypatch) -> None:
-    """Test that AGENTLET_API_KEY takes precedence over OPENAI_API_KEY."""
-    monkeypatch.setenv("AGENTLET_API_KEY", "agentlet-key")
-    monkeypatch.setenv("OPENAI_API_KEY", "openai-key")
-
-    resolved = resolve_settings_defaults(
-        AgentletSettings(api_key="file-key"),
-    )
-
-    assert resolved.api_key == "agentlet-key"
-
-
-def test_resolve_settings_defaults_openai_api_key_fallback(monkeypatch) -> None:
-    """Test that OPENAI_API_KEY is used when AGENTLET_API_KEY is not set."""
-    monkeypatch.delenv("AGENTLET_API_KEY", raising=False)
-    monkeypatch.setenv("OPENAI_API_KEY", "openai-key")
-
-    resolved = resolve_settings_defaults(
-        AgentletSettings(api_key="file-key"),
-    )
-
-    assert resolved.api_key == "openai-key"
-
-
-def test_resolve_settings_defaults_file_api_key_fallback(monkeypatch) -> None:
-    """Test that file api_key is used when no env vars are set."""
-    monkeypatch.delenv("AGENTLET_API_KEY", raising=False)
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-
-    resolved = resolve_settings_defaults(
-        AgentletSettings(api_key="file-key"),
-    )
-
-    assert resolved.api_key == "file-key"
-
-
-def test_resolve_settings_defaults_agentlet_base_url_precedence(monkeypatch) -> None:
-    """Test that AGENTLET_BASE_URL takes precedence over OPENAI_BASE_URL."""
-    monkeypatch.setenv("AGENTLET_BASE_URL", "http://agentlet.example/v1")
-    monkeypatch.setenv("OPENAI_BASE_URL", "http://openai.example/v1")
-
-    resolved = resolve_settings_defaults(
-        AgentletSettings(api_base="http://file.example/v1"),
-    )
-
-    assert resolved.api_base == "http://agentlet.example/v1"
-
-
-def test_resolve_settings_defaults_openai_base_url_fallback(monkeypatch) -> None:
-    """Test that OPENAI_BASE_URL is used when AGENTLET_BASE_URL is not set."""
-    monkeypatch.delenv("AGENTLET_BASE_URL", raising=False)
-    monkeypatch.setenv("OPENAI_BASE_URL", "http://openai.example/v1")
-
-    resolved = resolve_settings_defaults(
-        AgentletSettings(api_base="http://file.example/v1"),
-    )
-
-    assert resolved.api_base == "http://openai.example/v1"
-
-
-def test_resolve_settings_defaults_file_base_url_fallback(monkeypatch) -> None:
-    """Test that file api_base is used when no env vars are set."""
-    monkeypatch.delenv("AGENTLET_BASE_URL", raising=False)
-    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
-
-    resolved = resolve_settings_defaults(
-        AgentletSettings(api_base="http://file.example/v1"),
-    )
-
-    assert resolved.api_base == "http://file.example/v1"
-
-
 def test_default_settings_path_prefers_new_name(tmp_path) -> None:
-    """Test that default_settings_path returns new path when neither exists."""
     path = default_settings_path(tmp_path)
     assert path.name == "settings.json"
 
 
 def test_default_settings_path_uses_legacy_when_only_it_exists(tmp_path) -> None:
-    """Test that legacy setting.json is used when it exists and settings.json doesn't."""
     legacy_path = tmp_path / ".agentlet" / "setting.json"
     legacy_path.parent.mkdir(parents=True)
-    legacy_path.write_text('{}', encoding="utf-8")
+    legacy_path.write_text("{}", encoding="utf-8")
 
     path = default_settings_path(tmp_path)
     assert path.name == "setting.json"
 
 
 def test_default_settings_path_prefers_new_when_both_exist(tmp_path) -> None:
-    """Test that settings.json is preferred when both files exist."""
     new_path = tmp_path / ".agentlet" / "settings.json"
     legacy_path = tmp_path / ".agentlet" / "setting.json"
     new_path.parent.mkdir(parents=True)
-    new_path.write_text('{}', encoding="utf-8")
-    legacy_path.write_text('{}', encoding="utf-8")
+    new_path.write_text("{}", encoding="utf-8")
+    legacy_path.write_text("{}", encoding="utf-8")
 
     path = default_settings_path(tmp_path)
     assert path.name == "settings.json"
 
 
 def test_load_settings_rejects_unknown_keys_in_nested_defaults(tmp_path) -> None:
-    """Test that unknown keys in nested defaults section are rejected."""
     settings_path = default_settings_path(tmp_path)
     settings_path.parent.mkdir(parents=True)
     settings_path.write_text(
@@ -354,7 +323,6 @@ def test_load_settings_rejects_unknown_keys_in_nested_defaults(tmp_path) -> None
 
 
 def test_load_settings_rejects_non_object_defaults(tmp_path) -> None:
-    """Test that non-object defaults section is rejected."""
     settings_path = default_settings_path(tmp_path)
     settings_path.parent.mkdir(parents=True)
     settings_path.write_text(
@@ -364,211 +332,3 @@ def test_load_settings_rejects_non_object_defaults(tmp_path) -> None:
 
     with pytest.raises(SettingsError, match="must be an object"):
         load_settings(settings_path)
-
-
-# Provider-specific API key resolution tests
-def test_resolve_api_key_anthropic(monkeypatch) -> None:
-    """Test that ANTHROPIC_API_KEY is used for anthropic provider."""
-    monkeypatch.delenv("AGENTLET_API_KEY", raising=False)
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-key")
-
-    resolved = resolve_settings_defaults(
-        AgentletSettings(provider="anthropic", api_key="file-key"),
-    )
-
-    assert resolved.api_key == "anthropic-key"
-
-
-def test_resolve_api_key_gemini(monkeypatch) -> None:
-    """Test that GEMINI_API_KEY is used for gemini provider."""
-    monkeypatch.delenv("AGENTLET_API_KEY", raising=False)
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    monkeypatch.setenv("GEMINI_API_KEY", "gemini-key")
-
-    resolved = resolve_settings_defaults(
-        AgentletSettings(provider="gemini", api_key="file-key"),
-    )
-
-    assert resolved.api_key == "gemini-key"
-
-
-def test_resolve_api_key_azure(monkeypatch) -> None:
-    """Test that AZURE_API_KEY is used for azure provider."""
-    monkeypatch.delenv("AGENTLET_API_KEY", raising=False)
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    monkeypatch.setenv("AZURE_API_KEY", "azure-key")
-
-    resolved = resolve_settings_defaults(
-        AgentletSettings(provider="azure", api_key="file-key"),
-    )
-
-    assert resolved.api_key == "azure-key"
-
-
-def test_resolve_api_key_groq(monkeypatch) -> None:
-    """Test that GROQ_API_KEY is used for groq provider."""
-    monkeypatch.delenv("AGENTLET_API_KEY", raising=False)
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    monkeypatch.setenv("GROQ_API_KEY", "groq-key")
-
-    resolved = resolve_settings_defaults(
-        AgentletSettings(provider="groq", api_key="file-key"),
-    )
-
-    assert resolved.api_key == "groq-key"
-
-
-def test_resolve_api_key_together_ai(monkeypatch) -> None:
-    """Test that TOGETHERAI_API_KEY is used for together_ai provider."""
-    monkeypatch.delenv("AGENTLET_API_KEY", raising=False)
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    monkeypatch.setenv("TOGETHERAI_API_KEY", "together-key")
-
-    resolved = resolve_settings_defaults(
-        AgentletSettings(provider="together_ai", api_key="file-key"),
-    )
-
-    assert resolved.api_key == "together-key"
-
-
-def test_resolve_api_key_agentlet_over_provider(monkeypatch) -> None:
-    """Test that AGENTLET_API_KEY takes precedence over provider-specific key."""
-    monkeypatch.setenv("AGENTLET_API_KEY", "agentlet-key")
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-key")
-    monkeypatch.setenv("OPENAI_API_KEY", "openai-key")
-
-    resolved = resolve_settings_defaults(
-        AgentletSettings(provider="anthropic", api_key="file-key"),
-    )
-
-    assert resolved.api_key == "agentlet-key"
-
-
-def test_resolve_api_key_provider_over_openai(monkeypatch) -> None:
-    """Test that provider-specific key takes precedence over OPENAI_API_KEY."""
-    monkeypatch.delenv("AGENTLET_API_KEY", raising=False)
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-key")
-    monkeypatch.setenv("OPENAI_API_KEY", "openai-key")
-
-    resolved = resolve_settings_defaults(
-        AgentletSettings(provider="anthropic", api_key="file-key"),
-    )
-
-    assert resolved.api_key == "anthropic-key"
-
-
-def test_resolve_api_key_openai_provider_uses_openai_env(monkeypatch) -> None:
-    """Test that OPENAI_API_KEY is used for openai provider when no AGENTLET_API_KEY."""
-    monkeypatch.delenv("AGENTLET_API_KEY", raising=False)
-    monkeypatch.setenv("OPENAI_API_KEY", "openai-key")
-
-    resolved = resolve_settings_defaults(
-        AgentletSettings(provider="openai", api_key="file-key"),
-    )
-
-    assert resolved.api_key == "openai-key"
-
-
-# Provider-specific base URL resolution tests
-def test_resolve_api_base_anthropic(monkeypatch) -> None:
-    """Test that ANTHROPIC_BASE_URL is used for anthropic provider."""
-    monkeypatch.delenv("AGENTLET_BASE_URL", raising=False)
-    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
-    monkeypatch.setenv("ANTHROPIC_BASE_URL", "http://anthropic.example/v1")
-
-    resolved = resolve_settings_defaults(
-        AgentletSettings(provider="anthropic", api_base="http://file.example/v1"),
-    )
-
-    assert resolved.api_base == "http://anthropic.example/v1"
-
-
-def test_resolve_api_base_azure(monkeypatch) -> None:
-    """Test that AZURE_API_BASE is used for azure provider."""
-    monkeypatch.delenv("AGENTLET_BASE_URL", raising=False)
-    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
-    monkeypatch.setenv("AZURE_API_BASE", "http://azure.example/v1")
-
-    resolved = resolve_settings_defaults(
-        AgentletSettings(provider="azure", api_base="http://file.example/v1"),
-    )
-
-    assert resolved.api_base == "http://azure.example/v1"
-
-
-def test_resolve_api_base_together_ai(monkeypatch) -> None:
-    """Test that TOGETHERAI_BASE_URL is used for together_ai provider."""
-    monkeypatch.delenv("AGENTLET_BASE_URL", raising=False)
-    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
-    monkeypatch.setenv("TOGETHERAI_BASE_URL", "http://together.example/v1")
-
-    resolved = resolve_settings_defaults(
-        AgentletSettings(provider="together_ai", api_base="http://file.example/v1"),
-    )
-
-    assert resolved.api_base == "http://together.example/v1"
-
-
-def test_resolve_api_base_agentlet_over_provider(monkeypatch) -> None:
-    """Test that AGENTLET_BASE_URL takes precedence over provider-specific base URL."""
-    monkeypatch.setenv("AGENTLET_BASE_URL", "http://agentlet.example/v1")
-    monkeypatch.setenv("ANTHROPIC_BASE_URL", "http://anthropic.example/v1")
-    monkeypatch.setenv("OPENAI_BASE_URL", "http://openai.example/v1")
-
-    resolved = resolve_settings_defaults(
-        AgentletSettings(provider="anthropic", api_base="http://file.example/v1"),
-    )
-
-    assert resolved.api_base == "http://agentlet.example/v1"
-
-
-def test_resolve_api_base_provider_over_openai(monkeypatch) -> None:
-    """Test that provider-specific base URL takes precedence over OPENAI_BASE_URL."""
-    monkeypatch.delenv("AGENTLET_BASE_URL", raising=False)
-    monkeypatch.setenv("ANTHROPIC_BASE_URL", "http://anthropic.example/v1")
-    monkeypatch.setenv("OPENAI_BASE_URL", "http://openai.example/v1")
-
-    resolved = resolve_settings_defaults(
-        AgentletSettings(provider="anthropic", api_base="http://file.example/v1"),
-    )
-
-    assert resolved.api_base == "http://anthropic.example/v1"
-
-
-def test_resolve_api_base_no_provider_uses_openai_fallback(monkeypatch) -> None:
-    """Test that OPENAI_BASE_URL is used when no provider is set."""
-    monkeypatch.delenv("AGENTLET_BASE_URL", raising=False)
-    monkeypatch.setenv("OPENAI_BASE_URL", "http://openai.example/v1")
-
-    resolved = resolve_settings_defaults(
-        AgentletSettings(api_base="http://file.example/v1"),
-    )
-
-    assert resolved.api_base == "http://openai.example/v1"
-
-
-def test_resolve_api_key_no_provider_uses_openai_fallback(monkeypatch) -> None:
-    """Test that OPENAI_API_KEY is used when no provider is set."""
-    monkeypatch.delenv("AGENTLET_API_KEY", raising=False)
-    monkeypatch.setenv("OPENAI_API_KEY", "openai-key")
-
-    resolved = resolve_settings_defaults(
-        AgentletSettings(api_key="file-key"),
-    )
-
-    assert resolved.api_key == "openai-key"
-
-
-def test_resolve_settings_defaults_prefers_env_provider_over_stored(monkeypatch) -> None:
-    """Test that AGENTLET_PROVIDER env var takes precedence over stored value."""
-    monkeypatch.delenv("AGENTLET_API_KEY", raising=False)
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-key")
-    monkeypatch.setenv("AGENTLET_PROVIDER", "anthropic")
-
-    resolved = resolve_settings_defaults(
-        AgentletSettings(provider="openai", api_key="file-key"),
-    )
-
-    assert resolved.provider == "anthropic"
-    assert resolved.api_key == "anthropic-key"

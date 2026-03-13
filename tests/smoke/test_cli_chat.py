@@ -56,13 +56,6 @@ def test_main_chat_loads_defaults_from_user_settings(tmp_path, monkeypatch, caps
         encoding="utf-8",
     )
 
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
-    monkeypatch.delenv("AGENTLET_API_KEY", raising=False)
-    monkeypatch.delenv("AGENTLET_BASE_URL", raising=False)
-    monkeypatch.delenv("AGENTLET_MODEL", raising=False)
-    monkeypatch.delenv("AGENTLET_PROVIDER", raising=False)
-
     exit_code = cli_main.main(["chat", "hello from settings"], home_dir=tmp_path)
 
     captured = capsys.readouterr()
@@ -75,8 +68,8 @@ def test_main_chat_loads_defaults_from_user_settings(tmp_path, monkeypatch, caps
     assert config.model == "settings-model"
 
 
-def test_run_chat_command_interactive_new_session(tmp_path) -> None:
-    """Interactive mode should resume the previous session when requested."""
+def test_run_chat_command_interactive_starts_fresh_session_each_time(tmp_path) -> None:
+    """Interactive mode should always start a fresh session from the CLI."""
     from conftest import build_capture_console
 
     provider = FakeProvider()
@@ -85,8 +78,6 @@ def test_run_chat_command_interactive_new_session(tmp_path) -> None:
     settings = AgentletSettings(
         provider="openai",
         model="model-a",
-        api_key="test-key",
-        api_base="http://localhost:4000/v1",
         temperature=0.7,
         max_tokens=64,
     )
@@ -106,11 +97,12 @@ def test_run_chat_command_interactive_new_session(tmp_path) -> None:
         stdin_isatty=True,
     )
 
-    latest_session_id = session_store.load_latest_session_id()
+    first_session_id = session_store.load_latest_session_id()
+    first_session = session_store.load_session(first_session_id)
 
     console_two, output_two = build_capture_console()
     exit_code_two = run_chat_command(
-        make_cli_args(continue_session=True),
+        make_cli_args(),
         settings=settings,
         stdin=StringIO(""),
         stdout=StringIO(),
@@ -122,25 +114,28 @@ def test_run_chat_command_interactive_new_session(tmp_path) -> None:
         stdin_isatty=True,
     )
 
-    loaded = session_store.load_session(latest_session_id)
-    user_messages = [message.content for message in loaded.context.history if message.role == "user"]
+    second_session_id = session_store.load_latest_session_id()
+    second_session = session_store.load_session(second_session_id)
+    first_user_messages = [
+        message.content for message in first_session.context.history if message.role == "user"
+    ]
+    second_user_messages = [
+        message.content for message in second_session.context.history if message.role == "user"
+    ]
 
     assert exit_code_one == 0
     assert exit_code_two == 0
+    assert first_session_id != second_session_id
     assert "echo: first turn" in output_one.getvalue()
     assert "echo: second turn" in output_two.getvalue()
-    assert "resumed" in output_two.getvalue()
-    assert user_messages == ["first turn", "second turn"]
+    assert first_user_messages == ["first turn"]
+    assert second_user_messages == ["second turn"]
     assert [config.model for config in captured_configs] == ["model-a", "model-a"]
-    assert [config.api_base for config in captured_configs] == [
-        "http://localhost:4000/v1",
-        "http://localhost:4000/v1",
-    ]
     assert [config.temperature for config in captured_configs] == [0.7, 0.7]
     assert [config.max_tokens for config in captured_configs] == [64, 64]
 
 
-def test_run_chat_command_one_shot_uses_cli_overrides() -> None:
+def test_run_chat_command_one_shot_uses_non_sensitive_cli_overrides() -> None:
     captured_configs: list[ProviderConfig] = []
     provider_registry = FakeProviderRegistry(capture_config=captured_configs)
 
@@ -149,8 +144,6 @@ def test_run_chat_command_one_shot_uses_cli_overrides() -> None:
             message="hello",
             provider="anthropic",
             model="claude-3-5-sonnet",
-            api_key="override-key",
-            api_base="http://override.example/v1",
             temperature=0.4,
             max_tokens=512,
         ),
@@ -174,7 +167,7 @@ def test_run_chat_command_one_shot_uses_cli_overrides() -> None:
     config = captured_configs[0]
     assert config.name == "anthropic"
     assert config.model == "claude-3-5-sonnet"
-    assert config.api_key == "override-key"
-    assert config.api_base == "http://override.example/v1"
+    assert config.api_key == "settings-key"
+    assert config.api_base == "http://settings.example/v1"
     assert config.temperature == 0.4
     assert config.max_tokens == 512
