@@ -140,8 +140,8 @@ Add a separate policy object for capability switches:
 @dataclass(frozen=True)
 class ToolPolicy:
     allow_network: bool = True
-    allow_write: bool = False
-    allow_bash: bool = False
+    allow_write: bool = True
+    allow_bash: bool = True
 ```
 
 We should distinguish between three concepts:
@@ -150,14 +150,16 @@ We should distinguish between three concepts:
 - enabled tools: tools allowed by the local runtime policy
 - advertised tools: tools actually exposed to the model in the current run
 
-Recommended default policy:
+Default policy:
 
 - `Read`, `Glob`, `Grep`: enabled by default
-- `WebSearch`, `WebFetch`: enabled by default when network is allowed
-- `Write`, `Edit`: built in but disabled unless write access is enabled
-- `Bash`: built in but disabled unless shell access is enabled
+- `WebSearch`, `WebFetch`: enabled by default (when network is allowed)
+- `Write`, `Edit`: enabled by default
+- `Bash`: enabled by default
 
-This gives a useful default while avoiding surprising mutation or shell execution.
+All tools are enabled by default for a useful out-of-box experience. Users can
+disallow specific capabilities via CLI flags (`--deny-write`, `--deny-bash`,
+`--deny-network`) or settings file options.
 
 ### 6.3 Result normalization
 
@@ -255,7 +257,7 @@ Suggested arguments:
 
 Rules:
 
-- disabled unless write access is enabled
+- enabled by default; can be disabled via `--deny-write` flag or settings
 - must fail if the target file already exists
 - must fail when the path resolves outside `cwd`
 - should enforce a payload size limit
@@ -285,7 +287,7 @@ Suggested `EditOperation` shape:
 
 Rules:
 
-- disabled unless write access is enabled
+- enabled by default; can be disabled via `--deny-write` flag or settings
 - target file must already exist
 - when `replace_all` is `false`, `old_text` must match exactly once
 - when `replace_all` is `true`, zero matches should still fail
@@ -313,7 +315,7 @@ Suggested arguments:
 
 Rules:
 
-- disabled unless shell access is enabled
+- enabled by default; can be disabled via `--deny-bash` flag or settings
 - execution happens with `cwd` set to the workspace root
 - commands are not sandboxed and may access resources outside `cwd` with the current user's permissions
 - command timeout defaults to the runtime config limit
@@ -493,23 +495,28 @@ Operational rules:
 
 Phase 3 should keep tool wiring in `cli/` and tool behavior in `agent/tools/`.
 
-Recommended CLI-facing controls:
+CLI-facing controls:
 
-- `agentlet chat --allow-write`
-- `agentlet chat --allow-bash`
-- `agentlet chat --deny-network`
+- `agentlet chat --deny-write` - Disable Write and Edit tools
+- `agentlet chat --deny-bash` - Disable Bash tool
+- `agentlet chat --deny-network` - Disable WebSearch and WebFetch tools
 
-Recommended settings-file fields:
+Settings-file fields:
 
-- `allow_write`
-- `allow_bash`
-- `allow_network`
+- `allow_write` - Set to `false` to disable Write/Edit tools
+- `allow_bash` - Set to `false` to disable Bash tool
+- `allow_network` - Set to `false` to disable WebSearch/WebFetch tools
 
-Recommended startup behavior:
+Startup behavior:
 
 - build the default registry from CLI/settings policy
 - expose only enabled tools to the model
 - show the enabled tool set in `/status`
+
+The policy resolution order (highest priority first):
+1. CLI `--deny-*` flags (explicitly disable)
+2. Settings file values (explicitly enable/disable)
+3. Default values (all enabled)
 
 This is simpler than an interactive approval flow and fits the current CLI architecture better.
 
