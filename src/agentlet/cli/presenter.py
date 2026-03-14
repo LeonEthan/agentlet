@@ -77,8 +77,6 @@ class ChatPresenter:
                 )
             else:
                 self.console.print(f"  {line}")
-        self.console.print()
-        self.console.print("Alt+Enter for newline", style=Theme.DIM)
 
     def show_status(
         self,
@@ -118,9 +116,9 @@ class ChatPresenter:
         for i, (user_text, assistant_text) in enumerate(display_turns, 1):
             output.append(f"Turn {i}")
             output.append(SEPARATOR)
-            output.append(f"› {user_text}")
+            output.append(f"› {_truncate(user_text, 80)}")
             output.append("")
-            output.append(assistant_text or "")
+            output.append(_truncate(assistant_text, 80) if assistant_text else "")
             output.append("")
 
         if excess > 0:

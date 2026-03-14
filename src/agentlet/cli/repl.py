@@ -17,7 +17,7 @@ from agentlet.cli.sessions import LoadedSession, SessionStore, SessionTurnRecord
 class PromptInput(Protocol):
     """Small prompt protocol so smoke tests can inject a fake source."""
 
-    def prompt(self, prompt_text: str) -> str: ...
+    def prompt(self, prompt_text: str | None = None) -> str: ...
 
 
 def run_repl(
@@ -44,7 +44,7 @@ def run_repl(
 
     while True:
         try:
-            raw_input = prompt_input.prompt("> ")
+            raw_input = prompt_input.prompt()
             last_idle_interrupt = 0.0
         except KeyboardInterrupt:
             now = time.monotonic()
