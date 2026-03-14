@@ -61,7 +61,7 @@ class AgentLoop:
         tool_registry: ToolRegistry | None = None,
         *,
         system_prompt: str | None = None,
-        max_iterations: int = 8,
+        max_iterations: int = 80,
     ) -> None:
         if max_iterations < 1:
             raise ValueError("max_iterations must be at least 1.")
