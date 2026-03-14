@@ -9,6 +9,11 @@ from pathlib import Path
 from agentlet.agent.providers.registry import (
     ProviderRegistry,
 )
+from agentlet.agent.tools.policy import (
+    DEFAULT_MAX_HTML_EXTRACT_BYTES,
+    ToolPolicy,
+    ToolRuntimeConfig,
+)
 from agentlet.settings import (
     AgentletSettings,
     SettingsError,
@@ -19,9 +24,8 @@ from agentlet.settings import (
     write_settings,
 )
 from agentlet.agent.tools.builtins import build_default_registry
-from agentlet.agent.tools.policy import ToolPolicy, ToolRuntimeConfig
 from agentlet.agent.tools.registry import ToolRegistry
-from agentlet.cli.chat_app import ChatCLIError, run_chat_command
+from agentlet.cli.chat_app import ChatCLIError, _settings_from_args, run_chat_command
 
 
 def build_parser(defaults: AgentletSettings) -> argparse.ArgumentParser:
@@ -46,6 +50,18 @@ def build_parser(defaults: AgentletSettings) -> argparse.ArgumentParser:
         type=int,
         default=defaults.max_tokens,
         help="Default max_tokens override to store.",
+    )
+    init.add_argument(
+        "--max-iterations",
+        type=int,
+        default=defaults.max_iterations,
+        help="Default max provider/tool iterations per turn to store.",
+    )
+    init.add_argument(
+        "--max-html-extract-bytes",
+        type=int,
+        default=defaults.max_html_extract_bytes,
+        help="Default HTML fetch byte budget to use during readable-text extraction.",
     )
     init.add_argument(
         "--force",
@@ -78,6 +94,23 @@ def build_parser(defaults: AgentletSettings) -> argparse.ArgumentParser:
         type=int,
         default=defaults.max_tokens,
         help="Optional max_tokens override.",
+    )
+    chat.add_argument(
+        "--max-iterations",
+        type=int,
+        default=defaults.max_iterations,
+        help="Maximum provider/tool iterations per turn.",
+    )
+    chat.add_argument(
+        "--max-html-extract-bytes",
+        type=int,
+        default=defaults.max_html_extract_bytes,
+        help="Byte budget used for HTML readable-text extraction before truncating output.",
+    )
+    chat.add_argument(
+        "--auto-approve",
+        action="store_true",
+        help="Automatically approve write, bash, and network tool actions for this run.",
     )
     chat.add_argument(
         "--deny-write",
@@ -129,6 +162,24 @@ def _resolve_tool_policy(stored: AgentletSettings, args: argparse.Namespace) -> 
     )
 
 
+def _build_tool_runtime(
+    args: argparse.Namespace,
+    *,
+    settings: AgentletSettings,
+    cwd: Path,
+) -> ToolRuntimeConfig:
+    """Build runtime config from effective chat settings and cwd."""
+    chat_settings = _settings_from_args(args, fallback=settings)
+    return ToolRuntimeConfig(
+        cwd=cwd,
+        max_html_extract_bytes=(
+            chat_settings.max_html_extract_bytes
+            if chat_settings.max_html_extract_bytes is not None
+            else DEFAULT_MAX_HTML_EXTRACT_BYTES
+        ),
+    )
+
+
 def main(argv: list[str] | None = None, *, home_dir: Path | None = None) -> int:
     """Parse CLI input and dispatch to the requested command mode."""
     raw_argv = list(sys.argv[1:] if argv is None else argv)
@@ -163,6 +214,8 @@ def main(argv: list[str] | None = None, *, home_dir: Path | None = None) -> int:
                     api_base=stored_settings.api_base,
                     temperature=args.temperature,
                     max_tokens=args.max_tokens,
+                    max_iterations=args.max_iterations,
+                    max_html_extract_bytes=args.max_html_extract_bytes,
                     allow_write=stored_settings.allow_write,
                     allow_bash=stored_settings.allow_bash,
                     allow_network=stored_settings.allow_network,
@@ -185,7 +238,7 @@ def main(argv: list[str] | None = None, *, home_dir: Path | None = None) -> int:
     tool_policy = _resolve_tool_policy(stored_settings, args)
 
     # Build runtime config from cwd
-    tool_runtime = ToolRuntimeConfig(cwd=Path.cwd())
+    tool_runtime = _build_tool_runtime(args, settings=effective_settings, cwd=Path.cwd())
 
     # Build the default registry with enabled tools based on policy
     tool_registry = build_default_registry(tool_policy, tool_runtime)

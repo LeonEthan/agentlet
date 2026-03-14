@@ -5,8 +5,11 @@ from __future__ import annotations
 import codecs
 import html as html_lib
 import re
+import tempfile
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
+from uuid import uuid4
 
 import httpx
 
@@ -155,8 +158,6 @@ class WebFetchTool(Tool):
 
         # Clamp max_chars
         max_chars = max(100, min(max_chars, 100_000))
-        max_bytes = self.runtime.max_fetch_bytes
-
         try:
             async with httpx.AsyncClient(
                 follow_redirects=True,
@@ -174,6 +175,11 @@ class WebFetchTool(Tool):
                     final_url = str(response.url)
                     content_type = response.headers.get("content-type", "").lower()
                     is_html = "text/html" in content_type
+                    max_bytes = (
+                        self.runtime.max_html_extract_bytes
+                        if is_html
+                        else self.runtime.max_fetch_bytes
+                    )
 
                     if not is_html and "text/" not in content_type:
                         raise ToolExecutionError(
@@ -209,11 +215,22 @@ class WebFetchTool(Tool):
                         )
                         if extracted:
                             content = extracted
+                        elif response_byte_truncated:
+                            raise ToolExecutionError(
+                                "HTML exceeded fetch byte limit before readable text "
+                                "could be extracted; retry with a larger fetch budget."
+                            )
                         else:
                             # Fallback: use the raw text with basic HTML stripping
                             content = self._extract_text_fallback(response_text)
                     except ImportError:
-                        # trafilatura not installed, use fallback
+                        if response_byte_truncated:
+                            raise ToolExecutionError(
+                                "HTML exceeded fetch byte limit before readable text "
+                                "could be extracted; install trafilatura or retry with "
+                                "a larger fetch budget."
+                            )
+                        # trafilatura not installed, use fallback for complete documents
                         content = self._extract_text_fallback(response_text)
                 else:
                     content = response_text
@@ -223,18 +240,27 @@ class WebFetchTool(Tool):
                     title = self._extract_title(response_text)
 
                 # Apply character limit
-                content_truncated = len(content) > max_chars
+                full_content = content
+                content_truncated = len(full_content) > max_chars
+                artifact_path: str | None = None
                 if content_truncated:
+                    artifact_path = self._persist_fetch_artifact(
+                        final_url=final_url,
+                        title=title,
+                        content=full_content,
+                    )
                     # Try to break at a word boundary
-                    truncated_content = content[:max_chars]
+                    truncated_content = full_content[:max_chars]
                     last_space = truncated_content.rfind(" ")
                     if last_space > max_chars * 0.8:
                         truncated_content = truncated_content[:last_space]
                     content = truncated_content
+                else:
+                    content = full_content
 
                 truncated = response_byte_truncated or content_truncated
 
-                return build_tool_result_content({
+                payload = {
                     "ok": True,
                     "tool": "web_fetch",
                     "url": url,
@@ -243,7 +269,11 @@ class WebFetchTool(Tool):
                     "title": title,
                     "content": content,
                     "truncated": truncated,
-                })
+                }
+                if artifact_path is not None:
+                    payload["artifact_path"] = artifact_path
+
+                return build_tool_result_content(payload)
 
         except httpx.HTTPStatusError as exc:
             raise ToolExecutionError(
@@ -251,6 +281,8 @@ class WebFetchTool(Tool):
             ) from exc
         except httpx.RequestError as exc:
             raise ToolExecutionError(f"Failed to fetch {url}: {exc}") from exc
+        except ToolExecutionError:
+            raise
         except Exception as exc:
             raise ToolExecutionError(f"Failed to fetch {url}: {exc}") from exc
 
@@ -294,6 +326,45 @@ class WebFetchTool(Tool):
 
         decoder = decoder_cls(errors="replace")
         return decoder.decode(raw_bytes, final=not truncated)
+
+    def _persist_fetch_artifact(
+        self,
+        *,
+        final_url: str,
+        title: str,
+        content: str,
+    ) -> str:
+        """Persist large fetch content so the full text remains available."""
+        artifact_dir = Path(tempfile.gettempdir()) / "agentlet-fetch"
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        artifact_path = artifact_dir / f"{uuid4().hex}.txt"
+
+        artifact_body = self._build_artifact_body(
+            final_url=final_url,
+            title=title,
+            content=content,
+        )
+        try:
+            artifact_path.write_text(artifact_body, encoding="utf-8")
+        except OSError as exc:
+            raise ToolExecutionError(
+                f"Failed to persist fetched content artifact: {exc.strerror or exc}"
+            ) from exc
+        return str(artifact_path)
+
+    def _build_artifact_body(
+        self,
+        *,
+        final_url: str,
+        title: str,
+        content: str,
+    ) -> str:
+        lines = [f"URL: {final_url}"]
+        if title:
+            lines.append(f"Title: {title}")
+        lines.append("")
+        lines.append(content)
+        return "\n".join(lines)
 
     def _extract_text_fallback(self, html_text: str) -> str:
         """Basic HTML to text fallback when trafilatura is not available."""

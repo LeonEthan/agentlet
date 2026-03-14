@@ -52,6 +52,9 @@ class MaxIterationsExceeded(RuntimeError):
     pass
 
 
+DEFAULT_MAX_ITERATIONS = 8
+
+
 class AgentLoop:
     """Coordinate context building, model calls, and optional tool execution."""
 
@@ -61,7 +64,7 @@ class AgentLoop:
         tool_registry: ToolRegistry | None = None,
         *,
         system_prompt: str | None = None,
-        max_iterations: int = 80,
+        max_iterations: int = DEFAULT_MAX_ITERATIONS,
     ) -> None:
         if max_iterations < 1:
             raise ValueError("max_iterations must be at least 1.")

@@ -7,14 +7,21 @@ from types import SimpleNamespace
 import pytest
 
 from agentlet.agent.agent_loop import TurnEvent
+from agentlet.agent.tools.policy import DEFAULT_MAX_HTML_EXTRACT_BYTES
 from agentlet.agent.context import Message, ToolCall, ToolResult
 from agentlet.agent.providers.registry import DEFAULT_MODEL, ProviderRegistryError
-from agentlet.cli.main import _resolve_tool_policy, build_parser
-from agentlet.cli.chat_app import ChatCLIError, run_chat_command, _resolve_chat_mode, _settings_from_args
+from agentlet.cli.main import _build_tool_runtime, _resolve_tool_policy, build_parser
+from agentlet.cli.chat_app import (
+    ChatCLIError,
+    _create_agent_loop,
+    _resolve_chat_mode,
+    _settings_from_args,
+    run_chat_command,
+)
 from agentlet.cli.commands import CommandError, command_help_lines, parse_command, summarize_history
 from agentlet.cli.presenter import ChatPresenter
 from agentlet.settings import AgentletSettings
-from conftest import EchoTool, build_capture_console, make_cli_args
+from conftest import EchoTool, FakeProviderRegistry, build_capture_console, make_cli_args
 
 
 def test_resolve_chat_mode_prefers_interactive_tty_without_message() -> None:
@@ -264,6 +271,22 @@ def test_settings_from_args_inherits_api_credentials_when_provider_matches() -> 
     assert result.api_base == "https://api.openai.com/v1"
 
 
+def test_settings_from_args_carries_runtime_safety_overrides() -> None:
+    fallback = _make_openai_settings(
+        max_iterations=8,
+        max_html_extract_bytes=2_000_000,
+    )
+    args = make_cli_args(
+        max_iterations=12,
+        max_html_extract_bytes=750_000,
+    )
+
+    result = _settings_from_args(args, fallback=fallback)
+
+    assert result.max_iterations == 12
+    assert result.max_html_extract_bytes == 750_000
+
+
 def test_settings_from_args_clears_api_credentials_when_provider_overridden() -> None:
     """When provider is overridden via CLI, api_key/api_base are cleared to None."""
     fallback = _make_openai_settings()
@@ -275,6 +298,40 @@ def test_settings_from_args_clears_api_credentials_when_provider_overridden() ->
     assert result.model == "claude-3-sonnet"
     assert result.api_key is None  # Cleared, not inherited
     assert result.api_base is None  # Cleared, not inherited
+
+
+def test_build_tool_runtime_uses_effective_html_extract_budget(tmp_path) -> None:
+    runtime = _build_tool_runtime(
+        make_cli_args(max_html_extract_bytes=750_000),
+        settings=AgentletSettings(max_html_extract_bytes=2_000_000),
+        cwd=tmp_path,
+    )
+
+    assert runtime.cwd == tmp_path
+    assert runtime.max_html_extract_bytes == 750_000
+
+
+def test_build_tool_runtime_uses_default_html_extract_budget_when_unset(tmp_path) -> None:
+    runtime = _build_tool_runtime(
+        make_cli_args(),
+        settings=AgentletSettings(),
+        cwd=tmp_path,
+    )
+
+    assert runtime.max_html_extract_bytes == DEFAULT_MAX_HTML_EXTRACT_BYTES
+
+
+def test_create_agent_loop_uses_settings_max_iterations() -> None:
+    loop = _create_agent_loop(
+        settings=AgentletSettings(
+            provider="openai",
+            model="gpt-4",
+            max_iterations=11,
+        ),
+        provider_registry=FakeProviderRegistry(),
+    )
+
+    assert loop.max_iterations == 11
 
 
 def test_resolve_tool_policy_uses_stored_settings_without_deny_flags() -> None:

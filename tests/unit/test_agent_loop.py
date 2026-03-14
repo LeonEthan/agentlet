@@ -22,6 +22,12 @@ def test_agent_loop_returns_direct_response() -> None:
     assert provider.seen_messages == [["system", "user"]]
 
 
+def test_agent_loop_uses_small_default_max_iterations() -> None:
+    loop = AgentLoop(provider=FakeProvider([]))
+
+    assert loop.max_iterations == 8
+
+
 def test_agent_loop_executes_tool_calls() -> None:
     provider = FakeProvider(
         [

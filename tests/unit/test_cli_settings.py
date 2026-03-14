@@ -4,6 +4,8 @@ import json
 
 import pytest
 
+from agentlet.agent.agent_loop import DEFAULT_MAX_ITERATIONS
+from agentlet.agent.tools.policy import DEFAULT_MAX_HTML_EXTRACT_BYTES
 from agentlet.cli import main as cli_main
 from agentlet.settings import (
     AgentletSettings,
@@ -28,6 +30,8 @@ def test_load_settings_reads_user_scoped_json(tmp_path) -> None:
                 "api_base": "http://localhost:4000/v1",
                 "temperature": 0.5,
                 "max_tokens": 128,
+                "max_iterations": 12,
+                "max_html_extract_bytes": 750000,
             }
         )
         + "\n",
@@ -43,6 +47,8 @@ def test_load_settings_reads_user_scoped_json(tmp_path) -> None:
         api_base="http://localhost:4000/v1",
         temperature=0.5,
         max_tokens=128,
+        max_iterations=12,
+        max_html_extract_bytes=750000,
     )
 
 
@@ -64,6 +70,8 @@ def test_resolve_settings_defaults_uses_stored_values_and_built_ins() -> None:
             api_base="http://file.example/v1",
             temperature=None,
             max_tokens=99,
+            max_iterations=None,
+            max_html_extract_bytes=None,
         )
     )
 
@@ -74,6 +82,8 @@ def test_resolve_settings_defaults_uses_stored_values_and_built_ins() -> None:
         api_base="http://file.example/v1",
         temperature=0.0,
         max_tokens=99,
+        max_iterations=DEFAULT_MAX_ITERATIONS,
+        max_html_extract_bytes=DEFAULT_MAX_HTML_EXTRACT_BYTES,
     )
 
 
@@ -97,6 +107,10 @@ def test_main_init_writes_canonical_settings_file(tmp_path, capsys) -> None:
             "0.3",
             "--max-tokens",
             "256",
+            "--max-iterations",
+            "12",
+            "--max-html-extract-bytes",
+            "750000",
         ],
         home_dir=tmp_path,
     )
@@ -113,6 +127,8 @@ def test_main_init_writes_canonical_settings_file(tmp_path, capsys) -> None:
         "api_base": None,
         "temperature": 0.3,
         "max_tokens": 256,
+        "max_iterations": 12,
+        "max_html_extract_bytes": 750000,
         "allow_write": None,
         "allow_bash": None,
         "allow_network": None,
@@ -148,6 +164,8 @@ def test_main_init_force_repairs_invalid_settings_file(tmp_path) -> None:
         "api_base": None,
         "temperature": 0.0,
         "max_tokens": None,
+        "max_iterations": DEFAULT_MAX_ITERATIONS,
+        "max_html_extract_bytes": DEFAULT_MAX_HTML_EXTRACT_BYTES,
         "allow_write": None,
         "allow_bash": None,
         "allow_network": None,
@@ -166,6 +184,8 @@ def test_main_init_force_migrates_legacy_settings_filename(tmp_path) -> None:
                 "api_base": "http://legacy.example/v1",
                 "temperature": 0.2,
                 "max_tokens": 64,
+                "max_iterations": 14,
+                "max_html_extract_bytes": 820000,
             }
         )
         + "\n",
@@ -189,6 +209,8 @@ def test_main_init_force_migrates_legacy_settings_filename(tmp_path) -> None:
         "api_base": "http://legacy.example/v1",
         "temperature": 0.2,
         "max_tokens": 64,
+        "max_iterations": 14,
+        "max_html_extract_bytes": 820000,
         "allow_write": None,
         "allow_bash": None,
         "allow_network": None,
@@ -207,6 +229,8 @@ def test_main_init_force_preserves_existing_sensitive_settings(tmp_path) -> None
                 "api_base": "http://stored.example/v1",
                 "temperature": 0.1,
                 "max_tokens": 32,
+                "max_iterations": 10,
+                "max_html_extract_bytes": 640000,
             }
         )
         + "\n",
@@ -226,6 +250,8 @@ def test_main_init_force_preserves_existing_sensitive_settings(tmp_path) -> None
         "api_base": "http://stored.example/v1",
         "temperature": 0.8,
         "max_tokens": 32,
+        "max_iterations": 10,
+        "max_html_extract_bytes": 640000,
         "allow_write": None,
         "allow_bash": None,
         "allow_network": None,
@@ -244,6 +270,8 @@ def test_main_init_force_preserves_existing_tool_policy_settings(tmp_path) -> No
                 "api_base": "http://stored.example/v1",
                 "temperature": 0.1,
                 "max_tokens": 32,
+                "max_iterations": 10,
+                "max_html_extract_bytes": 640000,
                 "allow_write": False,
                 "allow_bash": True,
                 "allow_network": False,
@@ -266,6 +294,8 @@ def test_main_init_force_preserves_existing_tool_policy_settings(tmp_path) -> No
         "api_base": "http://stored.example/v1",
         "temperature": 0.1,
         "max_tokens": 32,
+        "max_iterations": 10,
+        "max_html_extract_bytes": 640000,
         "allow_write": False,
         "allow_bash": True,
         "allow_network": False,
@@ -284,6 +314,8 @@ def test_main_init_force_rejects_provider_change_with_stored_sensitive_settings(
                 "api_base": "http://stored.example/v1",
                 "temperature": 0.1,
                 "max_tokens": 32,
+                "max_iterations": 10,
+                "max_html_extract_bytes": 640000,
             }
         )
         + "\n",
@@ -304,6 +336,8 @@ def test_main_init_force_rejects_provider_change_with_stored_sensitive_settings(
         "api_base": "http://stored.example/v1",
         "temperature": 0.1,
         "max_tokens": 32,
+        "max_iterations": 10,
+        "max_html_extract_bytes": 640000,
     }
 
 

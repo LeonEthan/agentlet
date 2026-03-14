@@ -108,6 +108,10 @@ Module responsibilities:
 
 This keeps names explicit and avoids a catch-all helpers module.
 
+`ToolRegistry` remains the execution choke point. Capability policy still controls
+which tools are enabled, and approval handling for unsafe tool calls should stay
+centralized at the registry boundary rather than being reimplemented in each tool.
+
 ## 6. Tool Runtime Model
 
 ### 6.1 Tool runtime configuration
