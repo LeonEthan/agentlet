@@ -2,12 +2,14 @@ from __future__ import annotations
 
 """Rich-based rendering for the phase-2 CLI."""
 
+import json
 from pathlib import Path
 from textwrap import shorten
 
-from rich.console import Console, Group
+from rich.console import Console
 from rich.live import Live
 from rich.markdown import Markdown
+from rich.markup import escape
 
 from agentlet.agent.agent_loop import TurnEvent
 
@@ -157,9 +159,9 @@ class ChatPresenter:
 
         if event.kind == "tool_started" and event.tool_call is not None:
             self.stop_stream()
-            args = _truncate(event.tool_call.arguments_json, _TOOL_ARGS_LIMIT)
             self.console.print(
-                f"{STATUS_ICONS['pending']} {event.tool_call.name}({args})...",
+                f"{STATUS_ICONS['pending']} "
+                f"{_format_tool_call(event.tool_call.name, event.tool_call.arguments_json)}...",
                 style=Theme.DIM,
             )
             return
@@ -167,7 +169,8 @@ class ChatPresenter:
         if event.kind == "tool_completed" and event.tool_result is not None:
             self.stop_stream()
             self.console.print(
-                f"{STATUS_ICONS['success']} {event.tool_result.name} completed",
+                f"{STATUS_ICONS['success']} "
+                f"{escape(_format_tool_result(event.tool_result.name, event.tool_result.content))}",
                 style=Theme.SUCCESS,
             )
 
@@ -216,4 +219,114 @@ class ChatPresenter:
 
 def _truncate(text: str | None, limit: int = 80) -> str:
     """Truncate text to the specified limit with ellipsis."""
-    return shorten(text or "", width=limit, placeholder="...")
+    if not text or limit <= 0:
+        return ""
+
+    normalized = " ".join(text.split())
+    if len(normalized) <= limit:
+        return normalized
+
+    placeholder = "..."
+    if limit <= len(placeholder):
+        return placeholder[:limit]
+
+    if not any(char.isspace() for char in normalized):
+        return _truncate_middle(normalized, limit, placeholder)
+
+    shortened = shorten(normalized, width=limit, placeholder=placeholder)
+    if shortened != placeholder:
+        return shortened
+
+    return _truncate_middle(normalized, limit, placeholder)
+
+
+def _truncate_middle(text: str, limit: int, placeholder: str) -> str:
+    """Preserve both ends of a long token-like value."""
+    keep = limit - len(placeholder)
+    head = (keep + 1) // 2
+    tail = keep - head
+    if tail <= 0:
+        return text[:head] + placeholder
+    return f"{text[:head]}{placeholder}{text[-tail:]}"
+
+
+def _format_tool_call(name: str, arguments_json: str) -> str:
+    """Render a compact, high-signal tool start line."""
+    arguments = _load_json_object(arguments_json)
+    if arguments is None:
+        return f"{name}({_truncate(arguments_json, _TOOL_ARGS_LIMIT)})"
+
+    keys_by_tool = {
+        "read": ("path", "start_line", "end_line"),
+        "write": ("path",),
+        "edit": ("path",),
+        "bash": ("command",),
+        "glob": ("pattern",),
+        "grep": ("pattern", "glob"),
+        "web_search": ("query",),
+        "web_fetch": ("url",),
+    }
+    keys = keys_by_tool.get(name, tuple(arguments.keys()))
+    parts = []
+    for key in keys:
+        if key not in arguments:
+            continue
+        value = arguments[key]
+        rendered = repr(value) if isinstance(value, str) else str(value)
+        parts.append(f"{key}={_truncate(rendered, _TOOL_ARGS_LIMIT)}")
+    if not parts:
+        return name
+    return f"{name}({', '.join(parts)})"
+
+
+def _format_tool_result(name: str, content: str) -> str:
+    """Render a compact, tool-specific success summary."""
+    payload = _load_json_object(content)
+    if payload is None:
+        return f"{name} completed"
+
+    if name == "read":
+        path = payload.get("path", "")
+        start_line = payload.get("start_line")
+        end_line = payload.get("end_line")
+        truncated = payload.get("truncated", False)
+        return (
+            f"read {_truncate(str(path), 48)} "
+            f"lines {start_line}-{end_line} truncated={truncated}"
+        )
+    if name in {"write", "edit"}:
+        path = payload.get("path", "")
+        if name == "edit":
+            replacements = payload.get("total_replacements", 0)
+            return f"edit {_truncate(str(path), 48)} replacements={replacements}"
+        return f"write {_truncate(str(path), 48)} created"
+    if name == "bash":
+        command = _truncate(str(payload.get("command", "")), 48)
+        exit_code = payload.get("exit_code")
+        return f"bash {command} exit={exit_code}"
+    if name in {"glob", "grep"}:
+        match_count = len(payload.get("matches", []))
+        return f"{name} matches={match_count}"
+    if name == "web_search":
+        result_count = len(payload.get("results", []))
+        return f"web_search results={result_count}"
+    if name == "web_fetch":
+        final_url = _truncate(str(payload.get("final_url", payload.get("url", ""))), 48)
+        title = payload.get("title")
+        truncated = payload.get("truncated", False)
+        if title:
+            return (
+                f"web_fetch {final_url} "
+                f"title={_truncate(str(title), 32)} truncated={truncated}"
+            )
+        return f"web_fetch {final_url} truncated={truncated}"
+    return f"{name} completed"
+
+
+def _load_json_object(raw: str) -> dict[str, object] | None:
+    """Parse a JSON object payload when possible."""
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    return value if isinstance(value, dict) else None

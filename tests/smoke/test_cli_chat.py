@@ -135,7 +135,7 @@ def test_run_chat_command_interactive_starts_fresh_session_each_time(tmp_path) -
     assert [config.max_tokens for config in captured_configs] == [64, 64]
 
 
-def test_run_chat_command_one_shot_uses_non_sensitive_cli_overrides() -> None:
+def test_run_chat_command_one_shot_clears_provider_specific_credentials() -> None:
     captured_configs: list[ProviderConfig] = []
     provider_registry = FakeProviderRegistry(capture_config=captured_configs)
 
@@ -167,7 +167,7 @@ def test_run_chat_command_one_shot_uses_non_sensitive_cli_overrides() -> None:
     config = captured_configs[0]
     assert config.name == "anthropic"
     assert config.model == "claude-3-5-sonnet"
-    assert config.api_key == "settings-key"
-    assert config.api_base == "http://settings.example/v1"
+    assert config.api_key is None
+    assert config.api_base is None
     assert config.temperature == 0.4
     assert config.max_tokens == 512

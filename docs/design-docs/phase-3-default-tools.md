@@ -124,6 +124,7 @@ class ToolRuntimeConfig:
     max_write_bytes: int = 128_000
     max_search_results: int = 8
     max_fetch_chars: int = 20_000
+    max_fetch_bytes: int = 512_000
 ```
 
 Design intent:
@@ -202,7 +203,7 @@ Recommended helper shape:
 
 ```python
 def build_tool_result_content(payload: dict[str, Any]) -> str:
-    return json.dumps(payload, ensure_ascii=True)
+    return json.dumps(payload, ensure_ascii=False)
 ```
 
 Why this matters:
@@ -426,11 +427,11 @@ Suggested arguments:
 Default implementation choice:
 
 - use the current `ddgs` Python package
-- call text search with `backend="duckduckgo"` so the default behavior matches the product requirement rather than using a multi-engine blend
+- rely on the locked `ddgs` version's default backend selection instead of forcing an engine name whose semantics may shift across releases
 
 Why this is the right default:
 
-- it matches the requested DuckDuckGo-first behavior
+- it keeps runtime behavior aligned with the installed dependency rather than a backend string with unstable meaning
 - it avoids maintaining our own brittle scraping adapter
 - it keeps search concerns isolated behind one small tool implementation
 
@@ -446,6 +447,8 @@ Suggested result item fields:
 - `snippet`
 - `source`
 - `rank`
+
+`source` should be a normalized provenance hint from the upstream result when available, or a stable fallback such as `"ddgs"` when the library does not expose engine-level source metadata.
 
 Operational rules:
 
@@ -489,6 +492,7 @@ Operational rules:
 - support redirects
 - reject unsupported schemes
 - apply byte and character limits before returning content
+- decode byte-limited responses with truncation-aware codecs so complete multibyte characters survive full reads and exact-boundary truncation
 - if extraction fails but fetch succeeds, return a plain-text fallback extracted from the response body when possible
 
 ## 9. CLI and Configuration Implications

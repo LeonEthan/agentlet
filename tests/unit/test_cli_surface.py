@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from io import StringIO
 from types import SimpleNamespace
 
@@ -120,6 +121,78 @@ def test_presenter_renders_tool_activity_lines() -> None:
     rendered = output.getvalue()
     assert "⠋" in rendered  # Braille spinner for pending
     assert "✓" in rendered  # Checkmark for success
+
+
+def test_presenter_summarizes_tool_arguments_and_results() -> None:
+    console, output = build_capture_console()
+    presenter = ChatPresenter(console)
+    tool_call = ToolCall(
+        id="call-1",
+        name="web_search",
+        arguments_json='{"query":"agentlet phase 3","max_results":5}',
+    )
+    tool_result = ToolResult(
+        tool_call_id="call-1",
+        name="web_search",
+        content='{"ok":true,"tool":"web_search","query":"agentlet phase 3","results":[{"url":"https://example.com"}]}',
+    )
+
+    presenter.handle_event(TurnEvent(kind="tool_started", tool_call=tool_call))
+    presenter.handle_event(TurnEvent(kind="tool_completed", tool_result=tool_result))
+
+    rendered = output.getvalue()
+    assert "query='agentlet phase 3'" in rendered
+    assert "results=1" in rendered
+    assert '{"query"' not in rendered
+
+
+def test_presenter_keeps_long_single_token_values_identifiable() -> None:
+    console, output = build_capture_console()
+    presenter = ChatPresenter(console)
+    long_path = (
+        "/Users/cuizhengliang/Documents/vibe-coding/agentlet/"
+        "src/agentlet/cli/presenter.py"
+    )
+    long_url = (
+        "https://example.com/really/long/path/to/a/resource/with/query"
+        "?token=abcdef1234567890#section-anchor"
+    )
+
+    presenter.handle_event(
+        TurnEvent(
+            kind="tool_started",
+            tool_call=ToolCall(
+                id="call-1",
+                name="read",
+                arguments_json=json.dumps({"path": long_path}),
+            ),
+        )
+    )
+    presenter.handle_event(
+        TurnEvent(
+            kind="tool_completed",
+            tool_result=ToolResult(
+                tool_call_id="call-1",
+                name="web_fetch",
+                content=json.dumps(
+                    {
+                        "ok": True,
+                        "tool": "web_fetch",
+                        "final_url": long_url,
+                        "truncated": True,
+                    }
+                ),
+            ),
+        )
+    )
+
+    rendered = output.getvalue()
+    assert "path='/Users" in rendered
+    assert "presenter.py'" in rendered
+    assert "https://example.com" in rendered
+    assert "section-anchor" in rendered
+    assert "path=..." not in rendered
+    assert "web_fetch ... truncated=True" not in rendered
 
 
 def test_presenter_formats_help_commands_consistently() -> None:

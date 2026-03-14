@@ -21,6 +21,7 @@ class ToolRuntimeConfig:
     max_write_bytes: int = 128_000
     max_search_results: int = 8
     max_fetch_chars: int = 20_000
+    max_fetch_bytes: int = 512_000
 
 
 @dataclass(frozen=True)

@@ -361,14 +361,14 @@ Tools:    read, grep, glob, web_search, web_fetch
 
 **Proposed (Phase 3):**
 ```
-Turn 3 · 2 minutes ago
-─────────────────────
+Turn 3
+────────────────────
 › hello
 
 Hi there! How can I help?
 
-Turn 4 · just now
-─────────────────
+Turn 4
+────────────────────
 › what is 2+2?
 
 2 + 2 = 4
@@ -378,7 +378,6 @@ Turn 4 · just now
 - Conversation-style formatting
 - User input prefixed with `›`
 - Assistant output plain
-- Turn separators with relative timestamps
 - Truncate long content with "... (truncated)"
 
 ## 7. Implementation Plan
@@ -486,14 +485,14 @@ Session closed.
 ```
 › /history
 
-Turn 1 · 10 minutes ago
-──────────────────────
+Turn 1
+────────────────────
 › hello
 
 Hello! How can I help?
 
-Turn 2 · 5 minutes ago
-─────────────────────
+Turn 2
+────────────────────
 › read the README
 
 ⠋ Reading file...
@@ -501,8 +500,8 @@ Turn 2 · 5 minutes ago
 
 This project is a CLI harness for AI agents...
 
-Turn 3 · just now
-─────────────────
+Turn 3
+────────────────────
 › thanks
 
 You're welcome!
