@@ -118,8 +118,8 @@ def test_presenter_renders_tool_activity_lines() -> None:
     )
 
     rendered = output.getvalue()
-    assert "tool start" in rendered
-    assert "tool done" in rendered
+    assert "⠋" in rendered  # Braille spinner for pending
+    assert "✓" in rendered  # Checkmark for success
 
 
 def _make_openai_settings(**overrides) -> AgentletSettings:

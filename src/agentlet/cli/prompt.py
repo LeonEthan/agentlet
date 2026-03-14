@@ -10,6 +10,7 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.formatted_text import HTML
 
 
 def create_prompt_session(history_path: Path) -> PromptSession[str]:
@@ -20,6 +21,7 @@ def create_prompt_session(history_path: Path) -> PromptSession[str]:
         auto_suggest=AutoSuggestFromHistory(),
         multiline=True,
         key_bindings=_build_key_bindings(),
+        message=HTML("<ansibrightyellow>›</ansibrightyellow> "),
     )
 
 
