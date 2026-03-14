@@ -10,7 +10,7 @@ from agentlet.agent.context import Message, ToolCall, ToolResult
 from agentlet.agent.providers.registry import DEFAULT_MODEL, ProviderRegistryError
 from agentlet.cli.main import _resolve_tool_policy, build_parser
 from agentlet.cli.chat_app import ChatCLIError, run_chat_command, _resolve_chat_mode, _settings_from_args
-from agentlet.cli.commands import CommandError, parse_command, summarize_history
+from agentlet.cli.commands import CommandError, command_help_lines, parse_command, summarize_history
 from agentlet.cli.presenter import ChatPresenter
 from agentlet.settings import AgentletSettings
 from conftest import build_capture_console, make_cli_args
@@ -120,6 +120,16 @@ def test_presenter_renders_tool_activity_lines() -> None:
     rendered = output.getvalue()
     assert "⠋" in rendered  # Braille spinner for pending
     assert "✓" in rendered  # Checkmark for success
+
+
+def test_presenter_formats_help_commands_consistently() -> None:
+    console, output = build_capture_console()
+
+    ChatPresenter(console).show_help(command_help_lines())
+
+    rendered = output.getvalue()
+    assert "  /history     show recent turn summaries" in rendered
+    assert "  Enter submits, Alt+Enter inserts a newline." in rendered
 
 
 def _make_openai_settings(**overrides) -> AgentletSettings:

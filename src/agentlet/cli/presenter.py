@@ -70,8 +70,8 @@ class ChatPresenter:
         """Display help text with command/description pairs aligned."""
         self.console.print("Commands:")
         for line in lines:
-            cmd, _sep, desc = line.partition("  ")
-            if desc:
+            if line.startswith("/"):
+                cmd, _sep, desc = line.partition(" ")
                 self.console.print(
                     f"  {cmd:<{_HELP_CMD_WIDTH}} {desc.strip()}", style=Theme.DIM
                 )

@@ -18,7 +18,7 @@ class FakePromptSession:
     def __init__(self, inputs: list[str]) -> None:
         self._inputs = list(inputs)
 
-    def prompt(self, prompt_text: str) -> str:
+    def prompt(self, prompt_text: str | None = None) -> str:
         if not self._inputs:
             raise EOFError
         return self._inputs.pop(0)
