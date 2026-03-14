@@ -79,6 +79,7 @@ def run_repl(
                     model=current_session.model,
                     cwd=cwd,
                     message_count=len(context.history),
+                    tool_names=loop.tool_registry.get_tool_names(),
                 )
                 continue
             if command == "history":

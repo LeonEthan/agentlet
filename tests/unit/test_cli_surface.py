@@ -13,7 +13,7 @@ from agentlet.cli.chat_app import ChatCLIError, run_chat_command, _resolve_chat_
 from agentlet.cli.commands import CommandError, command_help_lines, parse_command, summarize_history
 from agentlet.cli.presenter import ChatPresenter
 from agentlet.settings import AgentletSettings
-from conftest import build_capture_console, make_cli_args
+from conftest import EchoTool, build_capture_console, make_cli_args
 
 
 def test_resolve_chat_mode_prefers_interactive_tty_without_message() -> None:
@@ -130,6 +130,41 @@ def test_presenter_formats_help_commands_consistently() -> None:
     rendered = output.getvalue()
     assert "  /history     show recent turn summaries" in rendered
     assert "  Enter submits, Alt+Enter inserts a newline." in rendered
+
+
+def test_run_chat_command_status_shows_enabled_tools(tmp_path) -> None:
+    from agentlet.agent.tools.registry import ToolRegistry
+    from conftest import FakeProviderRegistry
+
+    class FakePromptSession:
+        def __init__(self, inputs: list[str]) -> None:
+            self._inputs = list(inputs)
+
+        def prompt(self, prompt_text: str | None = None) -> str:
+            if not self._inputs:
+                raise EOFError
+            return self._inputs.pop(0)
+
+    console, output = build_capture_console()
+
+    exit_code = run_chat_command(
+        make_cli_args(),
+        settings=AgentletSettings(provider="openai", model="gpt-4"),
+        stdin=StringIO(""),
+        stdout=StringIO(),
+        stderr=StringIO(),
+        provider_registry=FakeProviderRegistry(),
+        tool_registry=ToolRegistry([EchoTool()]),
+        prompt_session=FakePromptSession(["/status", "/exit"]),
+        console=console,
+        cwd=tmp_path,
+        stdin_isatty=True,
+    )
+
+    rendered = output.getvalue()
+    assert exit_code == 0
+    assert "Tools:" in rendered
+    assert "echo" in rendered
 
 
 def _make_openai_settings(**overrides) -> AgentletSettings:

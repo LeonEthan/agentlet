@@ -153,7 +153,7 @@ Interactive commands:
 | Command | Action |
 |---------|--------|
 | `/help` | Show available commands |
-| `/status` | Show session info |
+| `/status` | Show session info and enabled tools |
 | `/history` | Show recent conversation turns |
 | `/new` | Start a new session |
 | `/clear` | Clear terminal screen |

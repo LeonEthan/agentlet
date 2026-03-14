@@ -71,6 +71,10 @@ class ToolRegistry:
         """Expose provider-visible schemas for all registered tools."""
         return [tool.spec for tool in self._tools.values()]
 
+    def get_tool_names(self) -> list[str]:
+        """Return enabled tool names in registration order."""
+        return list(self._tools.keys())
+
     async def execute(self, call: ToolCall) -> ToolResult:
         """Decode arguments, execute the tool, and normalize the returned result."""
         tool = self._tools.get(call.name)

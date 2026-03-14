@@ -86,15 +86,18 @@ class ChatPresenter:
         model: str,
         cwd: Path,
         message_count: int,
+        tool_names: list[str],
     ) -> None:
         """Display session status as aligned key-value pairs."""
         label_width = _STATUS_LABEL_WIDTH
+        tools = ", ".join(tool_names) if tool_names else "(none)"
         lines = [
             f"{'Session:':<{label_width}} {session_id}",
             f"{'Provider:':<{label_width}} {provider_name}",
             f"{'Model:':<{label_width}} {model}",
             f"{'CWD:':<{label_width}} {cwd}",
             f"{'Messages:':<{label_width}} {message_count}",
+            f"{'Tools:':<{label_width}} {tools}",
         ]
         self.console.print("\n".join(lines))
 

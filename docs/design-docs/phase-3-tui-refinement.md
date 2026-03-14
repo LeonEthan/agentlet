@@ -339,6 +339,7 @@ Provider: anthropic
 Model:    claude-sonnet-4-6
 CWD:      /path/to/project
 Messages: 12
+Tools:    read, grep, glob, web_search, web_fetch
 ```
 
 **Implementation:**
