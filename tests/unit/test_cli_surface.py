@@ -476,6 +476,91 @@ def test_run_chat_command_interactive_approval_eof_closes_session(tmp_path) -> N
     assert tool.seen_arguments == []
 
 
+def test_run_chat_command_interactive_ignores_stale_tool_calls_on_final_response(
+    tmp_path,
+) -> None:
+    from agentlet.agent.tools.registry import ToolSpec, ToolRegistry
+
+    class RecordingPromptSession:
+        def __init__(self, inputs: list[str]) -> None:
+            self._inputs = list(inputs)
+            self.seen_prompts: list[str | None] = []
+
+        def prompt(self, prompt_text: str | None = None) -> str:
+            raise AssertionError("interactive mode should use prompt_async()")
+
+        async def prompt_async(self, prompt_text: str | None = None) -> str:
+            self.seen_prompts.append(prompt_text)
+            if not self._inputs:
+                raise EOFError
+            return self._inputs.pop(0)
+
+    class FakeWriteTool:
+        spec = ToolSpec(
+            name="write",
+            description="fake write",
+            parameters={"type": "object", "properties": {"path": {"type": "string"}}},
+        )
+
+        def __init__(self) -> None:
+            self.seen_arguments: list[dict[str, str]] = []
+
+        async def execute(self, arguments: dict[str, str]) -> str:
+            self.seen_arguments.append(arguments)
+            return "ok"
+
+    class StaleToolCallStreamingProvider:
+        async def complete(self, messages, tools=None, model=None, temperature=None, max_tokens=None):
+            raise AssertionError("interactive mode should stream responses")
+
+        async def stream_complete(
+            self, messages, tools=None, model=None, temperature=None, max_tokens=None
+        ):
+            yield ProviderStreamEvent(kind="content_delta", text="final ")
+            yield ProviderStreamEvent(kind="content_delta", text="answer")
+            yield ProviderStreamEvent(
+                kind="response_complete",
+                response=LLMResponse(
+                    content="final answer",
+                    tool_calls=(
+                        ToolCall(
+                            id="call-1",
+                            name="write",
+                            arguments_json='{"path":"notes.txt"}',
+                        ),
+                    ),
+                    finish_reason="stop",
+                ),
+            )
+
+    console, output = build_capture_console()
+    prompt = RecordingPromptSession(["show the weather", "/exit"])
+    tool = FakeWriteTool()
+
+    exit_code = run_chat_command(
+        make_cli_args(),
+        settings=AgentletSettings(provider="openai", model="gpt-4"),
+        stdin=StringIO(""),
+        stdout=StringIO(),
+        stderr=StringIO(),
+        provider_registry=FakeProviderRegistry(provider=StaleToolCallStreamingProvider()),
+        tool_registry=ToolRegistry([tool]),
+        prompt_session=prompt,
+        console=console,
+        cwd=tmp_path,
+        stdin_isatty=True,
+    )
+
+    rendered = output.getvalue()
+    assert exit_code == 0
+    assert "final answer" in rendered
+    assert tool.seen_arguments == []
+    assert all(
+        prompt_text is None or "Approve write notes.txt?" not in prompt_text
+        for prompt_text in prompt.seen_prompts
+    )
+
+
 def test_run_chat_command_provider_eof_still_surfaces_as_turn_failure(tmp_path) -> None:
     class FakePromptSession:
         def __init__(self, inputs: list[str]) -> None:

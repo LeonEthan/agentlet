@@ -34,3 +34,5 @@ phase-1 runtime:
 - Session persistence is interactive-only in this phase.
 - Resume rehydrates `Context` from normalized transcript records.
 - One-shot mode remains final-output-only for scripting stability.
+- The runtime treats `finish_reason=stop` style assistant completions as terminal
+  even if a provider payload still carries stale `tool_calls`.
