@@ -6,12 +6,14 @@ A minimal Python agent harness.
 
 Current phase:
 
-- single-process agent loop with tool support
-- interactive TTY chat with streaming output
-- persisted cwd-scoped session transcripts under `~/.agentlet/sessions/` (grouped by working directory hash)
-- independent `Context`
-- `LiteLLM` provider integration
-- user-level `~/.agentlet/settings.json` defaults for local testing
+- Single-process agent loop with tool support
+- Interactive TTY chat with streaming output
+- Persisted cwd-scoped session transcripts under `~/.agentlet/sessions/` (grouped by working directory hash)
+- Independent `Context` with conversation history management
+- `LiteLLM` provider integration supporting multiple LLM backends
+- User-level `~/.agentlet/settings.json` configuration
+- Configurable tool policies (write, bash, network permissions)
+- Interactive approval prompts for unsafe operations
 
 ## Quick Start
 
@@ -27,8 +29,7 @@ Run `agentlet init` to create your settings file:
 
 ```bash
 # OpenAI (default)
-agentlet init \
-  --model gpt-5.4
+agentlet init
 ```
 
 Then edit `~/.agentlet/settings.json` to add `api_key` and `api_base` when your provider requires them.
@@ -58,10 +59,15 @@ The `agentlet init` command creates `~/.agentlet/settings.json`:
 {
   "provider": "openai",
   "model": "gpt-5.4",
-  "api_key": "your_api_key",
-  "api_base": "https://api.openai.com/v1",
+  "api_key": null,
+  "api_base": null,
   "temperature": 0.0,
-  "max_tokens": null
+  "max_tokens": null,
+  "max_iterations": 8,
+  "max_html_extract_bytes": 2000000,
+  "allow_write": null,
+  "allow_bash": null,
+  "allow_network": null
 }
 ```
 
@@ -69,17 +75,23 @@ The `agentlet init` command creates `~/.agentlet/settings.json`:
 
 Settings are resolved in this priority order (highest first):
 
-1. **Settings file** (`~/.agentlet/settings.json`)
-2. **Built-in defaults**
+1. **CLI arguments** (highest priority)
+2. **Settings file** (`~/.agentlet/settings.json`)
+3. **Built-in defaults**
 
-| Setting | Default |
-|---------|---------|
-| provider | `openai` |
-| model | `gpt-5.4` |
-| api_key | - |
-| api_base | - |
-| temperature | `0.0` |
-| max_tokens | `null` |
+| Setting | Default | Description |
+|---------|---------|-------------|
+| provider | `openai` | LLM provider name |
+| model | `gpt-5.4` | Model identifier |
+| api_key | `null` | API key for authentication |
+| api_base | `null` | Custom API base URL |
+| temperature | `0.0` | Sampling temperature |
+| max_tokens | `null` | Maximum tokens per response |
+| max_iterations | `8` | Maximum tool iterations per turn |
+| max_html_extract_bytes | `2000000` | Byte limit for HTML text extraction |
+| allow_write | `null` | Enable Write/Edit tools (defaults to true) |
+| allow_bash | `null` | Enable Bash tool (defaults to true) |
+| allow_network | `null` | Enable WebSearch/WebFetch tools (defaults to true) |
 
 ### Provider Examples
 
@@ -88,7 +100,7 @@ Settings are resolved in this priority order (highest first):
 ```bash
 agentlet init \
   --provider anthropic \
-  --model claude-3-5-sonnet-20241022
+  --model claude-sonnet-4-6
 ```
 
 #### DeepSeek
@@ -131,6 +143,30 @@ agentlet init \
   --model together_ai/llama-3.1-70b
 ```
 
+#### Cohere
+
+```bash
+agentlet init \
+  --provider cohere \
+  --model cohere/command-r
+```
+
+#### Mistral
+
+```bash
+agentlet init \
+  --provider mistral \
+  --model mistral/mistral-large
+```
+
+#### Fireworks
+
+```bash
+agentlet init \
+  --provider fireworks \
+  --model fireworks/llama-3.1-70b
+```
+
 ## CLI Usage
 
 ### One-Shot Mode
@@ -150,6 +186,22 @@ agentlet chat --print < prompt.txt
 # Force non-interactive output
 agentlet chat --print "Simple output without formatting"
 ```
+
+### Chat Options
+
+| Option | Description |
+|--------|-------------|
+| `--provider` | Override the provider for this run |
+| `--model` | Override the model for this run |
+| `--temperature` | Override the temperature for this run |
+| `--max-tokens` | Set maximum tokens for this run |
+| `--max-iterations` | Maximum tool iterations per turn (default: 8) |
+| `--max-html-extract-bytes` | Byte limit for HTML extraction |
+| `--auto-approve` | Automatically approve all tool actions |
+| `--deny-write` | Disable Write and Edit tools |
+| `--deny-bash` | Disable Bash tool |
+| `--deny-network` | Disable WebSearch and WebFetch tools |
+| `--print` | Force one-shot print mode |
 
 ### Interactive Mode
 
@@ -177,26 +229,28 @@ Once in interactive mode, use these commands:
 
 | Shortcut | Action |
 |----------|--------|
+| `Enter` | Submit message |
+| `Alt+Enter` | Insert newline in message |
 | `Ctrl+C` (during generation) | Cancel current turn, keep session |
-| `Ctrl+C` (while idle) | Clear input buffer |
-| `Ctrl+C` twice quickly | Exit session |
-| `Ctrl+D` | Exit session cleanly |
+| `Ctrl+C` (while idle) | Clear input buffer (press twice within 2s to exit) |
+| `Ctrl+D` or `Ctrl+C` twice | Exit session cleanly |
 
 ### Session Management
 
 Sessions are automatically persisted to `~/.agentlet/sessions/{cwd_hash}/`:
 
 ```bash
-# List your sessions (manual - files are in ~/.agentlet/sessions/)
+# List your sessions
 ls ~/.agentlet/sessions/*/
 ```
 
 Session behavior:
-- Each working directory has isolated sessions (identified by path hash)
+- Each working directory has isolated sessions (identified by SHA256 hash of the path)
 - Only completed turns are persisted (cancelled/failed turns are discarded)
-- Session headers store non-sensitive settings (model, temperature, etc.)
+- Session headers store non-sensitive settings (model, temperature, system prompt)
 - Each `agentlet chat` launch starts a fresh interactive session
-- History is global at `~/.agentlet/history`
+- Command history is global at `~/.agentlet/history`
+- Session transcripts are stored as JSONL files with schema versioning
 
 ## Development
 
@@ -221,32 +275,65 @@ AGENTLET_RUN_REAL_API_TESTS=1 uv run pytest tests/test_real_api.py -v
 ```
 agentlet/
 ├── src/agentlet/
-│   ├── agent/          # Core agent loop and runtime
-│   │   ├── agent_loop.py
-│   │   ├── context.py
-│   │   ├── providers/  # LLM provider adapters
-│   │   ├── tools/      # Tool registry
-│   │   └── prompts/    # System prompts
-│   ├── cli/            # CLI interface
-│   │   ├── main.py     # Entry point
-│   │   ├── chat_app.py # Mode selection
-│   │   ├── sessions.py # Session persistence
-│   │   ├── repl.py     # Interactive loop
-│   │   └── presenter.py # Rich rendering
-│   └── settings.py     # Settings management
+│   ├── agent/               # Core agent loop and runtime
+│   │   ├── agent_loop.py    # Agent orchestration loop
+│   │   ├── context.py       # Conversation context management
+│   │   ├── providers/       # LLM provider adapters
+│   │   │   ├── litellm_provider.py  # LiteLLM integration
+│   │   │   └── registry.py          # Provider registry
+│   │   ├── tools/           # Built-in tools
+│   │   │   ├── bash.py
+│   │   │   ├── builtins.py
+│   │   │   ├── local_fs.py
+│   │   │   ├── policy.py
+│   │   │   ├── registry.py
+│   │   │   └── web.py
+│   │   └── prompts/         # System prompts
+│   │       └── system_prompt.py
+│   ├── cli/                 # CLI interface
+│   │   ├── main.py          # Entry point and argument parsing
+│   │   ├── chat_app.py      # Chat mode selection and wiring
+│   │   ├── commands.py      # Slash command parsing
+│   │   ├── sessions.py      # Session persistence and loading
+│   │   ├── repl.py          # Interactive REPL loop
+│   │   ├── presenter.py     # Rich console output
+│   │   ├── prompt.py        # Prompt session setup
+│   │   └── approvals.py     # Interactive tool approval
+│   └── settings.py          # Settings management
 ├── tests/
-│   ├── unit/           # Unit tests
-│   └── smoke/          # Integration tests
-└── docs/               # Design docs
+│   ├── unit/                # Unit tests
+│   ├── smoke/               # Integration tests
+│   └── test_real_api.py     # Live API tests
+└── docs/                    # Design docs
+    └── design-docs/
 ```
 
-## Notes
+## Built-in Tools
+
+The agentlet comes with several built-in tools that can be enabled/disabled via settings or CLI flags:
+
+### Always Enabled (Read-Only)
+- **Read** - Read file contents
+- **Glob** - Find files matching a pattern
+- **Grep** - Search file contents
+
+### Network Tools (gated by `allow_network`)
+- **WebSearch** - Search the web using DuckDuckGo
+- **WebFetch** - Fetch and extract text from web pages
+
+### File Modification Tools (gated by `allow_write`)
+- **Write** - Write content to files
+- **Edit** - Edit existing files
+
+### System Tools (gated by `allow_bash`)
+- **Bash** - Execute shell commands
 
 ## Documentation
 
 - **[CLI Usage Guide](docs/cli-usage.md)** - Complete guide for configuration, commands, and examples
 - **[Phase 1 Design](docs/design-docs/phase-1-foundation.md)** - Core architecture and runtime design
 - **[Phase 2 Design](docs/design-docs/phase-2-cli-experience.md)** - CLI and interactive experience design
+- **[Phase 3 TUI Refinement](docs/design-docs/phase-3-tui-refinement.md)** - Terminal UI improvements
 
 ## Notes
 
@@ -254,3 +341,5 @@ agentlet/
 - `LiteLLM` may require provider-prefixed model names for some backends
 - Interactive sessions persist only completed turns; cancelled or failed turns are not committed
 - Session headers persist non-sensitive provider settings for transcript inspection and debugging
+- Settings file uses `0o600` permissions on Unix systems for security
+- Legacy `setting.json` files are automatically migrated to `settings.json`
