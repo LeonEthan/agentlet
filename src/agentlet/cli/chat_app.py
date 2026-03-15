@@ -136,7 +136,7 @@ def run_chat_command(
         effective_tool_registry.set_approval_handler(
             InteractiveApprovalHandler(
                 stdin=stdin,
-                stdout=stdout,
+                stdout=stderr,
                 auto_approve=args.auto_approve,
             )
         )

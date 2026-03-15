@@ -9,7 +9,11 @@ import pytest
 from agentlet.agent.agent_loop import TurnEvent
 from agentlet.agent.tools.policy import DEFAULT_MAX_HTML_EXTRACT_BYTES
 from agentlet.agent.context import Message, ToolCall, ToolResult
-from agentlet.agent.providers.registry import DEFAULT_MODEL, ProviderRegistryError
+from agentlet.agent.providers.registry import (
+    DEFAULT_MODEL,
+    LLMResponse,
+    ProviderRegistryError,
+)
 from agentlet.cli.main import _build_tool_runtime, _resolve_tool_policy, build_parser
 from agentlet.cli.chat_app import (
     ChatCLIError,
@@ -18,10 +22,22 @@ from agentlet.cli.chat_app import (
     _settings_from_args,
     run_chat_command,
 )
-from agentlet.cli.commands import CommandError, command_help_lines, parse_command, summarize_history
+from agentlet.cli.commands import (
+    CommandError,
+    TurnSummary,
+    command_help_lines,
+    parse_command,
+    summarize_history,
+)
 from agentlet.cli.presenter import ChatPresenter
 from agentlet.settings import AgentletSettings
-from conftest import EchoTool, FakeProviderRegistry, build_capture_console, make_cli_args
+from conftest import (
+    EchoTool,
+    FakeProvider,
+    FakeProviderRegistry,
+    build_capture_console,
+    make_cli_args,
+)
 
 
 def test_resolve_chat_mode_prefers_interactive_tty_without_message() -> None:
@@ -105,7 +121,40 @@ def test_summarize_history_uses_final_assistant_reply_after_tool_turn() -> None:
         Message(role="assistant", content="final answer"),
     ]
 
-    assert summarize_history(history) == [("look this up", "final answer")]
+    assert summarize_history(history) == [
+        TurnSummary(1, "look this up", "final answer")
+    ]
+
+
+def test_summarize_history_preserves_original_turn_numbers_when_trimmed() -> None:
+    history = [
+        Message(role="user", content="first"),
+        Message(role="assistant", content="one"),
+        Message(role="user", content="second"),
+        Message(role="assistant", content="two"),
+        Message(role="user", content="third"),
+        Message(role="assistant", content="three"),
+    ]
+
+    assert summarize_history(history, limit=2) == [
+        TurnSummary(2, "second", "two"),
+        TurnSummary(3, "third", "three"),
+    ]
+
+
+def test_presenter_show_history_uses_original_turn_numbers() -> None:
+    console, output = build_capture_console()
+
+    ChatPresenter(console).show_history(
+        [
+            TurnSummary(9, "ninth question", "ninth answer"),
+            TurnSummary(10, "tenth question", "tenth answer"),
+        ]
+    )
+
+    rendered = output.getvalue()
+    assert "Turn 9" in rendered
+    assert "Turn 10" in rendered
 
 
 def test_presenter_renders_tool_activity_lines() -> None:
@@ -245,6 +294,68 @@ def test_run_chat_command_status_shows_enabled_tools(tmp_path) -> None:
     assert exit_code == 0
     assert "Tools:" in rendered
     assert "echo" in rendered
+
+
+def test_run_chat_command_routes_one_shot_approval_prompts_to_stderr() -> None:
+    from io import StringIO
+
+    from agentlet.agent.tools.registry import ToolSpec, ToolRegistry
+
+    class FakeTTY(StringIO):
+        def __init__(self, value: str = "", *, is_tty: bool) -> None:
+            super().__init__(value)
+            self._is_tty = is_tty
+
+        def isatty(self) -> bool:
+            return self._is_tty
+
+    class FakeWriteTool:
+        spec = ToolSpec(
+            name="write",
+            description="fake write",
+            parameters={"type": "object", "properties": {"path": {"type": "string"}}},
+        )
+
+        def __init__(self) -> None:
+            self.seen_arguments: list[dict[str, str]] = []
+
+        async def execute(self, arguments: dict[str, str]) -> str:
+            self.seen_arguments.append(arguments)
+            return "ok"
+
+    provider = FakeProvider(
+        responses=[
+            LLMResponse(
+                content=None,
+                tool_calls=(
+                    ToolCall(
+                        id="call-1",
+                        name="write",
+                        arguments_json='{"path":"notes.txt"}',
+                    ),
+                ),
+            ),
+            LLMResponse(content="final answer", finish_reason="stop"),
+        ]
+    )
+    tool = FakeWriteTool()
+    stdout = StringIO()
+    stderr = FakeTTY("", is_tty=True)
+
+    exit_code = run_chat_command(
+        make_cli_args(message="write the file"),
+        settings=AgentletSettings(provider="openai", model="gpt-4"),
+        stdin=FakeTTY("y\n", is_tty=True),
+        stdout=stdout,
+        stderr=stderr,
+        provider_registry=FakeProviderRegistry(provider=provider),
+        tool_registry=ToolRegistry([tool]),
+    )
+
+    assert exit_code == 0
+    assert stdout.getvalue() == "final answer\n"
+    assert "Approve write notes.txt?" in stderr.getvalue()
+    assert tool.seen_arguments == [{"path": "notes.txt"}]
 
 
 def _make_openai_settings(**overrides) -> AgentletSettings:

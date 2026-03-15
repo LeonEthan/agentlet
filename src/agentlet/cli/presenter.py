@@ -12,6 +12,7 @@ from rich.markdown import Markdown
 from rich.markup import escape
 
 from agentlet.agent.agent_loop import TurnEvent
+from agentlet.cli.commands import TurnSummary
 
 
 # Layout constants
@@ -103,9 +104,7 @@ class ChatPresenter:
         ]
         self.console.print("\n".join(lines))
 
-    def show_history(
-        self, turns: list[tuple[str, str]], *, limit: int = _HISTORY_LIMIT
-    ) -> None:
+    def show_history(self, turns: list[TurnSummary], *, limit: int = _HISTORY_LIMIT) -> None:
         """Display conversation history with turn separators."""
         if not turns:
             self.console.print("No completed turns yet.", style=Theme.DIM)
@@ -118,12 +117,14 @@ class ChatPresenter:
         else:
             display_turns = turns
 
-        for i, (user_text, assistant_text) in enumerate(display_turns, 1):
-            output.append(f"Turn {i}")
+        for turn in display_turns:
+            output.append(f"Turn {turn.number}")
             output.append(SEPARATOR)
-            output.append(f"› {_truncate(user_text, 80)}")
+            output.append(f"› {_truncate(turn.user_text, 80)}")
             output.append("")
-            output.append(_truncate(assistant_text, 80) if assistant_text else "")
+            output.append(
+                _truncate(turn.assistant_text, 80) if turn.assistant_text else ""
+            )
             output.append("")
 
         if excess > 0:
