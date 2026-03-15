@@ -12,9 +12,11 @@ from agentlet.agent.context import Message, ToolCall, ToolResult
 from agentlet.agent.providers.registry import (
     DEFAULT_MODEL,
     LLMResponse,
+    ProviderStreamEvent,
     ProviderRegistryError,
 )
 from agentlet.cli.main import _build_tool_runtime, _resolve_tool_policy, build_parser
+import agentlet.cli.chat_app as chat_app_module
 from agentlet.cli.chat_app import (
     ChatCLIError,
     _create_agent_loop,
@@ -297,6 +299,288 @@ def test_run_chat_command_status_shows_enabled_tools(tmp_path) -> None:
     assert exit_code == 0
     assert "Tools:" in rendered
     assert "echo" in rendered
+
+
+def test_run_chat_command_interactive_approval_uses_async_prompt(tmp_path) -> None:
+    from agentlet.agent.tools.registry import ToolSpec, ToolRegistry
+
+    class AsyncOnlyPromptSession:
+        def __init__(self, inputs: list[str]) -> None:
+            self._inputs = list(inputs)
+            self.sync_calls = 0
+
+        def prompt(self, prompt_text: str | None = None) -> str:
+            self.sync_calls += 1
+            raise AssertionError("interactive approvals should use prompt_async()")
+
+        async def prompt_async(self, prompt_text: str | None = None) -> str:
+            if not self._inputs:
+                raise EOFError
+            return self._inputs.pop(0)
+
+    class FakeWriteTool:
+        spec = ToolSpec(
+            name="write",
+            description="fake write",
+            parameters={"type": "object", "properties": {"path": {"type": "string"}}},
+        )
+
+        def __init__(self) -> None:
+            self.seen_arguments: list[dict[str, str]] = []
+
+        async def execute(self, arguments: dict[str, str]) -> str:
+            self.seen_arguments.append(arguments)
+            return "ok"
+
+    class ScriptedStreamingProvider:
+        def __init__(self) -> None:
+            self._calls = 0
+
+        async def complete(self, messages, tools=None, model=None, temperature=None, max_tokens=None):
+            raise AssertionError("interactive mode should stream responses")
+
+        async def stream_complete(
+            self, messages, tools=None, model=None, temperature=None, max_tokens=None
+        ):
+            if self._calls == 0:
+                self._calls += 1
+                yield ProviderStreamEvent(
+                    kind="response_complete",
+                    response=LLMResponse(
+                        content=None,
+                        tool_calls=(
+                            ToolCall(
+                                id="call-1",
+                                name="write",
+                                arguments_json='{"path":"notes.txt"}',
+                            ),
+                        ),
+                    ),
+                )
+                return
+
+            self._calls += 1
+            yield ProviderStreamEvent(kind="content_delta", text="final ")
+            yield ProviderStreamEvent(kind="content_delta", text="answer")
+            yield ProviderStreamEvent(
+                kind="response_complete",
+                response=LLMResponse(content="final answer", finish_reason="stop"),
+            )
+
+    console, output = build_capture_console()
+    prompt = AsyncOnlyPromptSession(["write the file", "y", "/exit"])
+    tool = FakeWriteTool()
+
+    exit_code = run_chat_command(
+        make_cli_args(),
+        settings=AgentletSettings(provider="openai", model="gpt-4"),
+        stdin=StringIO(""),
+        stdout=StringIO(),
+        stderr=StringIO(),
+        provider_registry=FakeProviderRegistry(provider=ScriptedStreamingProvider()),
+        tool_registry=ToolRegistry([tool]),
+        prompt_session=prompt,
+        console=console,
+        cwd=tmp_path,
+        stdin_isatty=True,
+    )
+
+    rendered = output.getvalue()
+    assert exit_code == 0
+    assert "final answer" in rendered
+    assert "Turn failed" not in rendered
+    assert prompt.sync_calls == 0
+    assert tool.seen_arguments == [{"path": "notes.txt"}]
+
+
+def test_run_chat_command_interactive_approval_eof_closes_session(tmp_path) -> None:
+    from agentlet.agent.tools.registry import ToolSpec, ToolRegistry
+
+    class FakePromptSession:
+        def __init__(self, inputs: list[str]) -> None:
+            self._inputs = list(inputs)
+
+        def prompt(self, prompt_text: str | None = None) -> str:
+            raise AssertionError("interactive approvals should use prompt_async()")
+
+        async def prompt_async(self, prompt_text: str | None = None) -> str:
+            if not self._inputs:
+                raise EOFError
+            return self._inputs.pop(0)
+
+    class FakeWriteTool:
+        spec = ToolSpec(
+            name="write",
+            description="fake write",
+            parameters={"type": "object", "properties": {"path": {"type": "string"}}},
+        )
+
+        def __init__(self) -> None:
+            self.seen_arguments: list[dict[str, str]] = []
+
+        async def execute(self, arguments: dict[str, str]) -> str:
+            self.seen_arguments.append(arguments)
+            return "ok"
+
+    class ScriptedStreamingProvider:
+        def __init__(self) -> None:
+            self._calls = 0
+
+        async def complete(self, messages, tools=None, model=None, temperature=None, max_tokens=None):
+            raise AssertionError("interactive mode should stream responses")
+
+        async def stream_complete(
+            self, messages, tools=None, model=None, temperature=None, max_tokens=None
+        ):
+            if self._calls == 0:
+                self._calls += 1
+                yield ProviderStreamEvent(
+                    kind="response_complete",
+                    response=LLMResponse(
+                        content=None,
+                        tool_calls=(
+                            ToolCall(
+                                id="call-1",
+                                name="write",
+                                arguments_json='{"path":"notes.txt"}',
+                            ),
+                        ),
+                    ),
+                )
+                return
+
+            raise AssertionError("approval EOF should stop the session before another provider turn")
+
+    console, output = build_capture_console()
+    prompt = FakePromptSession(["write the file"])
+    tool = FakeWriteTool()
+
+    exit_code = run_chat_command(
+        make_cli_args(),
+        settings=AgentletSettings(provider="openai", model="gpt-4"),
+        stdin=StringIO(""),
+        stdout=StringIO(),
+        stderr=StringIO(),
+        provider_registry=FakeProviderRegistry(provider=ScriptedStreamingProvider()),
+        tool_registry=ToolRegistry([tool]),
+        prompt_session=prompt,
+        console=console,
+        cwd=tmp_path,
+        stdin_isatty=True,
+    )
+
+    rendered = output.getvalue()
+    assert exit_code == 0
+    assert "Session closed." in rendered
+    assert "Turn failed" not in rendered
+    assert tool.seen_arguments == []
+
+
+def test_run_chat_command_provider_eof_still_surfaces_as_turn_failure(tmp_path) -> None:
+    class FakePromptSession:
+        def __init__(self, inputs: list[str]) -> None:
+            self._inputs = list(inputs)
+
+        def prompt(self, prompt_text: str | None = None) -> str:
+            if not self._inputs:
+                raise EOFError
+            return self._inputs.pop(0)
+
+        async def prompt_async(self, prompt_text: str | None = None) -> str:
+            return self.prompt(prompt_text)
+
+    class EOFStreamingProvider:
+        async def complete(self, messages, tools=None, model=None, temperature=None, max_tokens=None):
+            raise AssertionError("interactive mode should stream responses")
+
+        async def stream_complete(
+            self, messages, tools=None, model=None, temperature=None, max_tokens=None
+        ):
+            raise EOFError("provider stream ended unexpectedly")
+            yield
+
+    console, output = build_capture_console()
+
+    exit_code = run_chat_command(
+        make_cli_args(),
+        settings=AgentletSettings(provider="openai", model="gpt-4"),
+        stdin=StringIO(""),
+        stdout=StringIO(),
+        stderr=StringIO(),
+        provider_registry=FakeProviderRegistry(provider=EOFStreamingProvider()),
+        prompt_session=FakePromptSession(["hello", "/exit"]),
+        console=console,
+        cwd=tmp_path,
+        stdin_isatty=True,
+    )
+
+    rendered = output.getvalue()
+    assert exit_code == 0
+    assert "Turn failed" in rendered
+    assert "provider stream ended unexpectedly" in rendered
+    assert "Session closed." in rendered
+
+
+def test_run_chat_command_closes_approval_handler_in_one_shot_and_interactive(tmp_path, monkeypatch) -> None:
+    closed_handlers: list[TrackingApprovalHandler] = []
+
+    class TrackingApprovalHandler:
+        def __init__(self, **kwargs) -> None:
+            self.kwargs = kwargs
+            self.close_calls = 0
+            closed_handlers.append(self)
+
+        async def approve(self, request) -> bool:
+            return True
+
+        def close(self) -> None:
+            self.close_calls += 1
+
+    monkeypatch.setattr(chat_app_module, "InteractiveApprovalHandler", TrackingApprovalHandler)
+
+    one_shot_exit = run_chat_command(
+        make_cli_args(message="hello"),
+        settings=AgentletSettings(provider="openai", model="gpt-4"),
+        stdin=StringIO(""),
+        stdout=StringIO(),
+        stderr=StringIO(),
+        provider_registry=FakeProviderRegistry(),
+        stdin_isatty=True,
+    )
+
+    class FakePromptSession:
+        def __init__(self, inputs: list[str]) -> None:
+            self._inputs = list(inputs)
+
+        def prompt(self, prompt_text: str | None = None) -> str:
+            if not self._inputs:
+                raise EOFError
+            return self._inputs.pop(0)
+
+        async def prompt_async(self, prompt_text: str | None = None) -> str:
+            return self.prompt(prompt_text)
+
+    console, _ = build_capture_console()
+    interactive_exit = run_chat_command(
+        make_cli_args(),
+        settings=AgentletSettings(provider="openai", model="gpt-4"),
+        stdin=StringIO(""),
+        stdout=StringIO(),
+        stderr=StringIO(),
+        provider_registry=FakeProviderRegistry(),
+        prompt_session=FakePromptSession(["/exit"]),
+        console=console,
+        cwd=tmp_path,
+        stdin_isatty=True,
+    )
+
+    assert one_shot_exit == 0
+    assert interactive_exit == 0
+    assert len(closed_handlers) == 2
+    assert [handler.close_calls for handler in closed_handlers] == [1, 1]
+    assert closed_handlers[0].kwargs["stdin"] is not None
+    assert closed_handlers[0].kwargs["stdout"] is not None
+    assert closed_handlers[1].kwargs["prompt_input"] is not None
 
 
 def test_run_chat_command_routes_one_shot_approval_prompts_to_stderr() -> None:

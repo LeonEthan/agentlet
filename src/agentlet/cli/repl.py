@@ -8,6 +8,7 @@ from typing import Protocol
 
 from agentlet.agent.agent_loop import AgentLoop
 from agentlet.agent.context import Context
+from agentlet.cli.approvals import ApprovalPromptClosed
 from agentlet.cli.commands import CommandError, command_help_lines, parse_command, summarize_history
 from agentlet.cli.presenter import ChatPresenter
 from agentlet.cli.sessions import LoadedSession, SessionStore, SessionTurnRecorder
@@ -126,6 +127,10 @@ async def run_repl(
             presenter.stop_stream()
             presenter.show_notice("Turn cancelled.")
             continue
+        except ApprovalPromptClosed:
+            presenter.stop_stream()
+            presenter.show_notice("Session closed.")
+            return 0
         except Exception as exc:
             presenter.stop_stream()
             presenter.show_error("Turn failed", str(exc))

@@ -3,15 +3,28 @@ from __future__ import annotations
 """Interactive approval helpers for unsafe tool execution."""
 
 from dataclasses import dataclass, field
+from typing import Awaitable
 from typing import Protocol, TextIO
 
 from agentlet.agent.tools.registry import ToolApprovalRequest
+
+
+class ApprovalPromptClosed(EOFError):
+    """Raised when the user closes an interactive approval prompt."""
 
 
 class ApprovalPrompt(Protocol):
     """Prompt interface shared by prompt_toolkit sessions and test doubles."""
 
     def prompt(self, prompt_text: str | None = None) -> str: ...
+
+
+class AsyncApprovalPrompt(Protocol):
+    """Async prompt interface exposed by prompt_toolkit sessions."""
+
+    def prompt_async(
+        self, prompt_text: str | None = None
+    ) -> Awaitable[str]: ...
 
 
 @dataclass
@@ -49,7 +62,10 @@ class InteractiveApprovalHandler:
             "[y]es/[n]o/[a]ll-for-session: "
         )
         while True:
-            response = self._prompt(prompt_text).strip().lower()
+            try:
+                response = (await self._prompt(prompt_text)).strip().lower()
+            except EOFError as exc:
+                raise ApprovalPromptClosed() from exc
             if response in {"y", "yes"}:
                 return True
             if response in {"n", "no", ""}:
@@ -87,8 +103,11 @@ class InteractiveApprovalHandler:
                 pass
         return self._tty_file is not None
 
-    def _prompt(self, prompt_text: str) -> str:
+    async def _prompt(self, prompt_text: str) -> str:
         if self.prompt_input is not None:
+            prompt_async = getattr(self.prompt_input, "prompt_async", None)
+            if callable(prompt_async):
+                return await prompt_async(prompt_text)
             return self.prompt_input.prompt(prompt_text)
         # Use the controlling terminal if available (e.g., when stdin is piped)
         if self._tty_file is not None:

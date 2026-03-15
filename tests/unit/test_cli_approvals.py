@@ -4,6 +4,7 @@ import asyncio
 from io import StringIO
 
 from agentlet.agent.tools.registry import ToolApprovalRequest
+from agentlet.cli.approvals import ApprovalPromptClosed
 from agentlet.cli.approvals import InteractiveApprovalHandler
 
 
@@ -13,6 +14,23 @@ class FakePrompt:
         self.seen_prompts: list[str] = []
 
     def prompt(self, prompt_text: str | None = None) -> str:
+        self.seen_prompts.append(prompt_text or "")
+        return self._responses.pop(0)
+
+
+class AsyncOnlyPrompt:
+    def __init__(self, responses: list[str]) -> None:
+        self._responses = list(responses)
+        self.seen_prompts: list[str] = []
+        self.sync_calls = 0
+        self.async_calls = 0
+
+    def prompt(self, prompt_text: str | None = None) -> str:
+        self.sync_calls += 1
+        raise AssertionError("prompt() should not be used when prompt_async() exists")
+
+    async def prompt_async(self, prompt_text: str | None = None) -> str:
+        self.async_calls += 1
         self.seen_prompts.append(prompt_text or "")
         return self._responses.pop(0)
 
@@ -59,6 +77,48 @@ def test_interactive_approval_handler_rejects_without_promptable_tty() -> None:
     approved = asyncio.run(handler.approve(request))
 
     assert approved is False
+
+
+def test_interactive_approval_handler_prefers_async_prompt_when_available() -> None:
+    prompt = AsyncOnlyPrompt(["y"])
+    handler = InteractiveApprovalHandler(prompt_input=prompt)
+    request = ToolApprovalRequest(
+        tool_name="web_search",
+        scope="network",
+        arguments={"query": "Changsha weather forecast next week"},
+        summary="web_search Changsha weather forecast next week",
+    )
+
+    approved = asyncio.run(handler.approve(request))
+
+    assert approved is True
+    assert prompt.async_calls == 1
+    assert prompt.sync_calls == 0
+    assert prompt.seen_prompts == [
+        "Approve web_search Changsha weather forecast next week? "
+        "[y]es/[n]o/[a]ll-for-session: "
+    ]
+
+
+def test_interactive_approval_handler_wraps_prompt_eof() -> None:
+    class EOFPrompt:
+        async def prompt_async(self, prompt_text: str | None = None) -> str:
+            raise EOFError
+
+    handler = InteractiveApprovalHandler(prompt_input=EOFPrompt())
+    request = ToolApprovalRequest(
+        tool_name="web_search",
+        scope="network",
+        arguments={"query": "Changsha weather forecast next week"},
+        summary="web_search Changsha weather forecast next week",
+    )
+
+    try:
+        asyncio.run(handler.approve(request))
+    except ApprovalPromptClosed:
+        pass
+    else:
+        raise AssertionError("approval prompt EOF should raise ApprovalPromptClosed")
 
 
 def test_interactive_approval_handler_cannot_prompt_with_redirected_stdout() -> None:

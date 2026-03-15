@@ -133,34 +133,35 @@ def run_chat_command(
     effective_tool_registry = tool_registry or ToolRegistry()
 
     if not interactive:
-        effective_tool_registry.set_approval_handler(
-            InteractiveApprovalHandler(
-                stdin=stdin,
-                stdout=stderr,
-                auto_approve=args.auto_approve,
-            )
+        approval_handler = InteractiveApprovalHandler(
+            stdin=stdin,
+            stdout=stderr,
+            auto_approve=args.auto_approve,
         )
-        result = asyncio.run(
-            run_chat(
-                message=message or "",
-                settings=chat_settings,
-                provider_registry=provider_registry,
-                tool_registry=effective_tool_registry,
+        effective_tool_registry.set_approval_handler(approval_handler)
+        try:
+            result = asyncio.run(
+                run_chat(
+                    message=message or "",
+                    settings=chat_settings,
+                    provider_registry=provider_registry,
+                    tool_registry=effective_tool_registry,
+                )
             )
-        )
-        print(result.output, file=stdout)
-        return 0
+            print(result.output, file=stdout)
+            return 0
+        finally:
+            approval_handler.close()
 
     session_store = SessionStore(working_dir)
     system_prompt = build_system_prompt()
     config = _create_provider_config(chat_settings)
     prompt = prompt_session or create_prompt_session(session_store.history_path)
-    effective_tool_registry.set_approval_handler(
-        InteractiveApprovalHandler(
-            prompt_input=prompt,
-            auto_approve=args.auto_approve,
-        )
+    approval_handler = InteractiveApprovalHandler(
+        prompt_input=prompt,
+        auto_approve=args.auto_approve,
     )
+    effective_tool_registry.set_approval_handler(approval_handler)
     loop = _create_agent_loop(
         settings=chat_settings,
         provider_registry=provider_registry,
@@ -193,7 +194,10 @@ def run_chat_command(
             loaded_session=loaded_session,
         )
 
-    return asyncio.run(_run_repl_async())
+    try:
+        return asyncio.run(_run_repl_async())
+    finally:
+        approval_handler.close()
 
 
 def _settings_from_args(
