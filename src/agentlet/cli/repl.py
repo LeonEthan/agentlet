@@ -17,6 +17,7 @@ class PromptInput(Protocol):
     """Small prompt protocol so smoke tests can inject a fake source."""
 
     def prompt(self, prompt_text: str | None = None) -> str: ...
+    async def prompt_async(self, prompt_text: str | None = None) -> str: ...
 
 
 async def run_repl(
@@ -43,7 +44,7 @@ async def run_repl(
 
     while True:
         try:
-            raw_input = prompt_input.prompt()
+            raw_input = await prompt_input.prompt_async()
             last_idle_interrupt = 0.0
         except KeyboardInterrupt:
             now = time.monotonic()

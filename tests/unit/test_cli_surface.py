@@ -274,6 +274,9 @@ def test_run_chat_command_status_shows_enabled_tools(tmp_path) -> None:
                 raise EOFError
             return self._inputs.pop(0)
 
+        async def prompt_async(self, prompt_text: str | None = None) -> str:
+            return self.prompt(prompt_text)
+
     console, output = build_capture_console()
 
     exit_code = run_chat_command(

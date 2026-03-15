@@ -23,6 +23,9 @@ class FakePromptSession:
             raise EOFError
         return self._inputs.pop(0)
 
+    async def prompt_async(self, prompt_text: str | None = None) -> str:
+        return self.prompt(prompt_text)
+
 
 def test_main_chat_prints_response(monkeypatch, capsys) -> None:
     captured_configs: list[ProviderConfig] = []
