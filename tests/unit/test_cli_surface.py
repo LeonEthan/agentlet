@@ -476,6 +476,100 @@ def test_run_chat_command_interactive_approval_eof_closes_session(tmp_path) -> N
     assert tool.seen_arguments == []
 
 
+def test_run_chat_command_restores_main_prompt_after_approval(tmp_path) -> None:
+    from agentlet.agent.tools.registry import ToolSpec, ToolRegistry
+
+    class StickyPromptSession:
+        def __init__(self, inputs: list[str]) -> None:
+            self._inputs = list(inputs)
+            self.message = "› "
+            self.seen_messages: list[str] = []
+
+        def prompt(self, prompt_text: str | None = None) -> str:
+            raise AssertionError("interactive mode should use prompt_async()")
+
+        async def prompt_async(self, prompt_text: str | None = None) -> str:
+            if prompt_text is not None:
+                self.message = prompt_text
+            self.seen_messages.append(self.message)
+            if not self._inputs:
+                raise EOFError
+            return self._inputs.pop(0)
+
+    class FakeSearchTool:
+        spec = ToolSpec(
+            name="web_search",
+            description="fake web search",
+            parameters={"type": "object", "properties": {"query": {"type": "string"}}},
+        )
+
+        async def execute(self, arguments: dict[str, str]) -> str:
+            return '{"results":[]}'
+
+    class ScriptedStreamingProvider:
+        def __init__(self) -> None:
+            self._calls = 0
+
+        async def complete(self, messages, tools=None, model=None, temperature=None, max_tokens=None):
+            raise AssertionError("interactive mode should stream responses")
+
+        async def stream_complete(
+            self, messages, tools=None, model=None, temperature=None, max_tokens=None
+        ):
+            if self._calls == 0:
+                self._calls += 1
+                yield ProviderStreamEvent(
+                    kind="response_complete",
+                    response=LLMResponse(
+                        content=None,
+                        tool_calls=(
+                            ToolCall(
+                                id="call-1",
+                                name="web_search",
+                                arguments_json='{"query":"Changsha weather forecast next week"}',
+                            ),
+                        ),
+                        finish_reason="tool_calls",
+                    ),
+                )
+                return
+
+            self._calls += 1
+            yield ProviderStreamEvent(kind="content_delta", text="final ")
+            yield ProviderStreamEvent(kind="content_delta", text="answer")
+            yield ProviderStreamEvent(
+                kind="response_complete",
+                response=LLMResponse(content="final answer", finish_reason="stop"),
+            )
+
+    console, output = build_capture_console()
+    prompt = StickyPromptSession(["show the weather", "y", "/exit"])
+
+    exit_code = run_chat_command(
+        make_cli_args(),
+        settings=AgentletSettings(provider="openai", model="gpt-4"),
+        stdin=StringIO(""),
+        stdout=StringIO(),
+        stderr=StringIO(),
+        provider_registry=FakeProviderRegistry(provider=ScriptedStreamingProvider()),
+        tool_registry=ToolRegistry([FakeSearchTool()]),
+        prompt_session=prompt,
+        console=console,
+        cwd=tmp_path,
+        stdin_isatty=True,
+    )
+
+    rendered = output.getvalue()
+    assert exit_code == 0
+    assert "final answer" in rendered
+    assert prompt.seen_messages == [
+        "› ",
+        "Approve web_search Changsha weather forecast next week? "
+        "[y]es/[n]o/[a]ll-for-session: ",
+        "› ",
+    ]
+
+
 def test_run_chat_command_interactive_ignores_stale_tool_calls_on_final_response(
     tmp_path,
 ) -> None:

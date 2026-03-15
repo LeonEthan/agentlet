@@ -129,3 +129,35 @@ def test_interactive_approval_handler_cannot_prompt_with_redirected_stdout() -> 
     )
 
     assert handler.can_prompt() is False
+
+
+def test_interactive_approval_handler_restores_prompt_session_message() -> None:
+    class StickyPrompt:
+        def __init__(self, responses: list[str]) -> None:
+            self._responses = list(responses)
+            self.message = "› "
+            self.seen_messages: list[str] = []
+
+        async def prompt_async(self, prompt_text: str | None = None) -> str:
+            if prompt_text is not None:
+                self.message = prompt_text
+            self.seen_messages.append(self.message)
+            return self._responses.pop(0)
+
+    prompt = StickyPrompt(["y"])
+    handler = InteractiveApprovalHandler(prompt_input=prompt)
+    request = ToolApprovalRequest(
+        tool_name="web_search",
+        scope="network",
+        arguments={"query": "Changsha weather forecast next week"},
+        summary="web_search Changsha weather forecast next week",
+    )
+
+    approved = asyncio.run(handler.approve(request))
+
+    assert approved is True
+    assert prompt.seen_messages == [
+        "Approve web_search Changsha weather forecast next week? "
+        "[y]es/[n]o/[a]ll-for-session: "
+    ]
+    assert prompt.message == "› "

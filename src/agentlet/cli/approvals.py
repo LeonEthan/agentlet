@@ -106,9 +106,13 @@ class InteractiveApprovalHandler:
     async def _prompt(self, prompt_text: str) -> str:
         if self.prompt_input is not None:
             prompt_async = getattr(self.prompt_input, "prompt_async", None)
-            if callable(prompt_async):
-                return await prompt_async(prompt_text)
-            return self.prompt_input.prompt(prompt_text)
+            original_message = _get_prompt_message(self.prompt_input)
+            try:
+                if callable(prompt_async):
+                    return await prompt_async(prompt_text)
+                return self.prompt_input.prompt(prompt_text)
+            finally:
+                _restore_prompt_message(self.prompt_input, original_message)
         # Use the controlling terminal if available (e.g., when stdin is piped)
         if self._tty_file is not None:
             self._tty_file.write(prompt_text)
@@ -119,3 +123,18 @@ class InteractiveApprovalHandler:
         self.stdout.write(prompt_text)
         self.stdout.flush()
         return self.stdin.readline()
+
+
+def _get_prompt_message(prompt_input: object) -> object:
+    """Capture the current prompt message when using PromptSession-like inputs."""
+    return getattr(prompt_input, "message", None)
+
+
+def _restore_prompt_message(prompt_input: object, message: object) -> None:
+    """Restore the original prompt message after an approval prompt overrides it."""
+    if not hasattr(prompt_input, "message"):
+        return
+    try:
+        setattr(prompt_input, "message", message)
+    except (AttributeError, TypeError):
+        return
