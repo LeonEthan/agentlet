@@ -17,6 +17,15 @@ class FakePrompt:
         return self._responses.pop(0)
 
 
+class FakeTTY(StringIO):
+    def __init__(self, value: str = "", *, is_tty: bool) -> None:
+        super().__init__(value)
+        self._is_tty = is_tty
+
+    def isatty(self) -> bool:
+        return self._is_tty
+
+
 def test_interactive_approval_handler_approves_for_session_scope() -> None:
     handler = InteractiveApprovalHandler(prompt_input=FakePrompt(["a"]))
     request = ToolApprovalRequest(
@@ -50,3 +59,13 @@ def test_interactive_approval_handler_rejects_without_promptable_tty() -> None:
     approved = asyncio.run(handler.approve(request))
 
     assert approved is False
+
+
+def test_interactive_approval_handler_cannot_prompt_with_redirected_stdout() -> None:
+    handler = InteractiveApprovalHandler(
+        stdin=FakeTTY("y\n", is_tty=True),
+        stdout=FakeTTY("", is_tty=False),
+        auto_approve=False,
+    )
+
+    assert handler.can_prompt() is False

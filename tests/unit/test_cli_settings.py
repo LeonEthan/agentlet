@@ -135,6 +135,17 @@ def test_main_init_writes_canonical_settings_file(tmp_path, capsys) -> None:
     }
 
 
+@pytest.mark.parametrize("flag", ["--max-iterations", "--max-html-extract-bytes"])
+def test_main_init_rejects_non_positive_max_settings(tmp_path, flag: str) -> None:
+    settings_path = default_settings_path(tmp_path)
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli_main.main(["init", flag, "0"], home_dir=tmp_path)
+
+    assert exc_info.value.code == 2
+    assert not settings_path.exists()
+
+
 def test_main_chat_rejects_invalid_settings_file(tmp_path) -> None:
     settings_path = default_settings_path(tmp_path)
     settings_path.parent.mkdir(parents=True)

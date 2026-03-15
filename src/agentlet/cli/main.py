@@ -28,6 +28,18 @@ from agentlet.agent.tools.registry import ToolRegistry
 from agentlet.cli.chat_app import ChatCLIError, _settings_from_args, run_chat_command
 
 
+def _int_at_least(minimum: int):
+    """Build an argparse type that rejects integers smaller than minimum."""
+
+    def parse(raw_value: str) -> int:
+        value = int(raw_value)
+        if value < minimum:
+            raise argparse.ArgumentTypeError(f"must be an integer >= {minimum}")
+        return value
+
+    return parse
+
+
 def build_parser(defaults: AgentletSettings) -> argparse.ArgumentParser:
     """Build the small phase-1 CLI surface."""
     parser = argparse.ArgumentParser(prog="agentlet")
@@ -53,13 +65,13 @@ def build_parser(defaults: AgentletSettings) -> argparse.ArgumentParser:
     )
     init.add_argument(
         "--max-iterations",
-        type=int,
+        type=_int_at_least(1),
         default=defaults.max_iterations,
         help="Default max provider/tool iterations per turn to store.",
     )
     init.add_argument(
         "--max-html-extract-bytes",
-        type=int,
+        type=_int_at_least(1),
         default=defaults.max_html_extract_bytes,
         help="Default HTML fetch byte budget to use during readable-text extraction.",
     )
@@ -97,13 +109,13 @@ def build_parser(defaults: AgentletSettings) -> argparse.ArgumentParser:
     )
     chat.add_argument(
         "--max-iterations",
-        type=int,
+        type=_int_at_least(1),
         default=defaults.max_iterations,
         help="Maximum provider/tool iterations per turn.",
     )
     chat.add_argument(
         "--max-html-extract-bytes",
-        type=int,
+        type=_int_at_least(1),
         default=defaults.max_html_extract_bytes,
         help="Byte budget used for HTML readable-text extraction before truncating output.",
     )

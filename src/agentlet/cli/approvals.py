@@ -49,8 +49,14 @@ class InteractiveApprovalHandler:
             return True
         if self.stdin is None or self.stdout is None:
             return False
-        isatty = getattr(self.stdin, "isatty", None)
-        return bool(isatty and isatty())
+        stdin_isatty = getattr(self.stdin, "isatty", None)
+        stdout_isatty = getattr(self.stdout, "isatty", None)
+        return bool(
+            stdin_isatty
+            and stdin_isatty()
+            and stdout_isatty
+            and stdout_isatty()
+        )
 
     def _prompt(self, prompt_text: str) -> str:
         if self.prompt_input is not None:
