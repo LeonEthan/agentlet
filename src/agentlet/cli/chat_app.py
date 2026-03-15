@@ -182,14 +182,18 @@ def run_chat_command(
     )
 
     presenter = ChatPresenter(console or Console(file=stdout, stderr=False))
-    return run_repl(
-        loop=loop,
-        prompt_input=prompt,
-        presenter=presenter,
-        session_store=session_store,
-        cwd=working_dir,
-        loaded_session=loaded_session,
-    )
+
+    async def _run_repl_async() -> int:
+        return await run_repl(
+            loop=loop,
+            prompt_input=prompt,
+            presenter=presenter,
+            session_store=session_store,
+            cwd=working_dir,
+            loaded_session=loaded_session,
+        )
+
+    return asyncio.run(_run_repl_async())
 
 
 def _settings_from_args(

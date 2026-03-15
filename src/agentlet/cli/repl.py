@@ -2,7 +2,6 @@ from __future__ import annotations
 
 """Interactive REPL orchestration for phase-2 chat sessions."""
 
-import asyncio
 import time
 from pathlib import Path
 from typing import Protocol
@@ -20,7 +19,7 @@ class PromptInput(Protocol):
     def prompt(self, prompt_text: str | None = None) -> str: ...
 
 
-def run_repl(
+async def run_repl(
     *,
     loop: AgentLoop,
     prompt_input: PromptInput,
@@ -116,13 +115,11 @@ def run_repl(
             presenter.handle_event(event)
 
         try:
-            asyncio.run(
-                loop.run_turn(
-                    message,
-                    context=context,
-                    event_sink=handle_event,
-                    stream=True,
-                )
+            await loop.run_turn(
+                message,
+                context=context,
+                event_sink=handle_event,
+                stream=True,
             )
         except KeyboardInterrupt:
             presenter.stop_stream()
