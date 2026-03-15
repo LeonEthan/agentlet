@@ -111,7 +111,7 @@ def _build_settings_from_dict(data: dict[str, Any], path: Path) -> AgentletSetti
         max_tokens=_validate_int_field(data, "max_tokens", path),
         max_iterations=_validate_int_field(data, "max_iterations", path, minimum=1),
         max_html_extract_bytes=_validate_int_field(
-            data, "max_html_extract_bytes", path, minimum=1
+            data, "max_html_extract_bytes", path, minimum=1, maximum=10_000_000
         ),
         allow_write=_validate_bool_field(data, "allow_write", path),
         allow_bash=_validate_bool_field(data, "allow_bash", path),
@@ -229,6 +229,7 @@ def _validate_int_field(
     path: Path,
     *,
     minimum: int | None = None,
+    maximum: int | None = None,
 ) -> int | None:
     value = payload.get(key)
     if value is None:
@@ -238,6 +239,10 @@ def _validate_int_field(
     if minimum is not None and value < minimum:
         raise SettingsError(
             f"Settings key `{key}` in {path} must be an integer >= {minimum} or null."
+        )
+    if maximum is not None and value > maximum:
+        raise SettingsError(
+            f"Settings key `{key}` in {path} must be an integer <= {maximum} or null."
         )
     return value
 

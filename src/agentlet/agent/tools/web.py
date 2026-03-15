@@ -165,7 +165,8 @@ class WebFetchTool(Tool):
                 headers={
                     "User-Agent": (
                         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                        "AppleWebKit/537.0"
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/120.0.0.0 Safari/537.36"
                     ),
                 },
             ) as client:
@@ -346,6 +347,10 @@ class WebFetchTool(Tool):
         )
         try:
             artifact_path.write_text(artifact_body, encoding="utf-8")
+            import os
+
+            if os.name != "nt":
+                artifact_path.chmod(0o600)
         except OSError as exc:
             raise ToolExecutionError(
                 f"Failed to persist fetched content artifact: {exc.strerror or exc}"

@@ -162,6 +162,12 @@ Default policy:
 - `Write`, `Edit`: enabled by default
 - `Bash`: enabled by default
 
+> **Note:** As of this revision, `allow_write` and `allow_bash` default to `True`
+> for a useful out-of-box experience. In earlier drafts these defaulted to `False`.
+> Users who want the more restrictive behavior should use `--deny-write` and
+> `--deny-bash` CLI flags or set `allow_write: false` and `allow_bash: false` in
+> their settings file.
+
 All tools are enabled by default for a useful out-of-box experience. Users can
 disallow specific capabilities via CLI flags (`--deny-write`, `--deny-bash`,
 `--deny-network`) or settings file options.
