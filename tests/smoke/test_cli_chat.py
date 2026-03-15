@@ -4,12 +4,27 @@ from io import StringIO
 from pathlib import Path
 from typing import Any
 
+from prompt_toolkit import PromptSession
+from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
+from prompt_toolkit.formatted_text import HTML
+from prompt_toolkit.history import FileHistory
+from prompt_toolkit.input.defaults import create_pipe_input
+from prompt_toolkit.output import DummyOutput
+
+from agentlet.agent.context import ToolCall
+from agentlet.agent.providers.registry import LLMResponse, ProviderStreamEvent
 from agentlet.agent.providers.registry import ProviderConfig
 from agentlet.cli import main as cli_main
 from agentlet.cli.chat_app import run_chat_command
+from agentlet.cli.prompt import _build_key_bindings
 from agentlet.cli.sessions import SessionStore
 from agentlet.settings import AgentletSettings, default_settings_path
-from conftest import FakeProvider, FakeProviderRegistry, make_cli_args
+from conftest import (
+    FakeProvider,
+    FakeProviderRegistry,
+    build_capture_console,
+    make_cli_args,
+)
 
 
 class FakePromptSession:
@@ -18,10 +33,26 @@ class FakePromptSession:
     def __init__(self, inputs: list[str]) -> None:
         self._inputs = list(inputs)
 
-    def prompt(self, prompt_text: str) -> str:
+    def prompt(self, prompt_text: str | None = None) -> str:
         if not self._inputs:
             raise EOFError
         return self._inputs.pop(0)
+
+    async def prompt_async(self, prompt_text: str | None = None) -> str:
+        return self.prompt(prompt_text)
+
+
+def _make_real_prompt_session(*, history_path: Path, pipe_input) -> PromptSession[str]:
+    history_path.parent.mkdir(parents=True, exist_ok=True)
+    return PromptSession(
+        input=pipe_input,
+        output=DummyOutput(),
+        history=FileHistory(str(history_path)),
+        auto_suggest=AutoSuggestFromHistory(),
+        multiline=True,
+        key_bindings=_build_key_bindings(),
+        message=HTML("<ansibrightyellow>›</ansibrightyellow> "),
+    )
 
 
 def test_main_chat_prints_response(monkeypatch, capsys) -> None:
@@ -135,7 +166,7 @@ def test_run_chat_command_interactive_starts_fresh_session_each_time(tmp_path) -
     assert [config.max_tokens for config in captured_configs] == [64, 64]
 
 
-def test_run_chat_command_one_shot_uses_non_sensitive_cli_overrides() -> None:
+def test_run_chat_command_one_shot_clears_provider_specific_credentials() -> None:
     captured_configs: list[ProviderConfig] = []
     provider_registry = FakeProviderRegistry(capture_config=captured_configs)
 
@@ -167,7 +198,163 @@ def test_run_chat_command_one_shot_uses_non_sensitive_cli_overrides() -> None:
     config = captured_configs[0]
     assert config.name == "anthropic"
     assert config.model == "claude-3-5-sonnet"
-    assert config.api_key == "settings-key"
-    assert config.api_base == "http://settings.example/v1"
+    assert config.api_key is None
+    assert config.api_base is None
     assert config.temperature == 0.4
     assert config.max_tokens == 512
+
+
+def test_run_chat_command_interactive_prompt_toolkit_multiline_input_round_trips(
+    tmp_path: Path,
+) -> None:
+    class RecordingStreamingProvider:
+        def __init__(self) -> None:
+            self.user_messages: list[str] = []
+
+        async def complete(self, messages, tools=None, model=None, temperature=None, max_tokens=None):
+            raise AssertionError("interactive mode should stream responses")
+
+        async def stream_complete(
+            self, messages, tools=None, model=None, temperature=None, max_tokens=None
+        ):
+            user_message = next(
+                message.content for message in reversed(messages) if message.role == "user"
+            )
+            self.user_messages.append(user_message)
+            yield ProviderStreamEvent(kind="content_delta", text="echo: ")
+            yield ProviderStreamEvent(kind="content_delta", text=user_message)
+            yield ProviderStreamEvent(
+                kind="response_complete",
+                response=LLMResponse(content=f"echo: {user_message}", finish_reason="stop"),
+            )
+
+    provider = RecordingStreamingProvider()
+    console, output = build_capture_console()
+    session_store = SessionStore(tmp_path)
+
+    with create_pipe_input() as pipe_input:
+        prompt_session = _make_real_prompt_session(
+            history_path=session_store.history_path,
+            pipe_input=pipe_input,
+        )
+        pipe_input.send_text("first line")
+        pipe_input.send_text("\x1b\r")
+        pipe_input.send_text("second line\r")
+        pipe_input.send_text("/exit\r")
+
+        exit_code = run_chat_command(
+            make_cli_args(),
+            settings=AgentletSettings(provider="openai", model="gpt-4"),
+            stdin=StringIO(""),
+            stdout=StringIO(),
+            stderr=StringIO(),
+            provider_registry=FakeProviderRegistry(provider=provider),
+            prompt_session=prompt_session,
+            console=console,
+            cwd=tmp_path,
+            stdin_isatty=True,
+        )
+
+    session_id = session_store.load_latest_session_id()
+    loaded = session_store.load_session(session_id)
+    user_messages = [message.content for message in loaded.context.history if message.role == "user"]
+
+    assert exit_code == 0
+    assert provider.user_messages == ["first line\nsecond line"]
+    assert "echo: first line" in output.getvalue()
+    assert "second line" in output.getvalue()
+    assert user_messages == ["first line\nsecond line"]
+
+
+def test_run_chat_command_interactive_prompt_toolkit_approval_flow_smoke(
+    tmp_path: Path,
+) -> None:
+    from agentlet.agent.tools.registry import ToolSpec, ToolRegistry
+
+    class FakeWriteTool:
+        spec = ToolSpec(
+            name="write",
+            description="fake write",
+            parameters={"type": "object", "properties": {"path": {"type": "string"}}},
+        )
+
+        def __init__(self) -> None:
+            self.seen_arguments: list[dict[str, str]] = []
+
+        async def execute(self, arguments: dict[str, str]) -> str:
+            self.seen_arguments.append(arguments)
+            return "ok"
+
+    class ScriptedStreamingProvider:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def complete(self, messages, tools=None, model=None, temperature=None, max_tokens=None):
+            raise AssertionError("interactive mode should stream responses")
+
+        async def stream_complete(
+            self, messages, tools=None, model=None, temperature=None, max_tokens=None
+        ):
+            if self.calls == 0:
+                self.calls += 1
+                yield ProviderStreamEvent(
+                    kind="response_complete",
+                    response=LLMResponse(
+                        content=None,
+                        tool_calls=(
+                            ToolCall(
+                                id="call-1",
+                                name="write",
+                                arguments_json='{"path":"notes.txt"}',
+                            ),
+                        ),
+                        finish_reason="tool_calls",
+                    ),
+                )
+                return
+
+            self.calls += 1
+            yield ProviderStreamEvent(kind="content_delta", text="final ")
+            yield ProviderStreamEvent(kind="content_delta", text="answer")
+            yield ProviderStreamEvent(
+                kind="response_complete",
+                response=LLMResponse(content="final answer", finish_reason="stop"),
+            )
+
+    tool = FakeWriteTool()
+    console, output = build_capture_console()
+    session_store = SessionStore(tmp_path)
+
+    with create_pipe_input() as pipe_input:
+        prompt_session = _make_real_prompt_session(
+            history_path=session_store.history_path,
+            pipe_input=pipe_input,
+        )
+        pipe_input.send_text("write the file\r")
+        pipe_input.send_text("y\r")
+        pipe_input.send_text("/exit\r")
+
+        exit_code = run_chat_command(
+            make_cli_args(),
+            settings=AgentletSettings(provider="openai", model="gpt-4"),
+            stdin=StringIO(""),
+            stdout=StringIO(),
+            stderr=StringIO(),
+            provider_registry=FakeProviderRegistry(provider=ScriptedStreamingProvider()),
+            tool_registry=ToolRegistry([tool]),
+            prompt_session=prompt_session,
+            console=console,
+            cwd=tmp_path,
+            stdin_isatty=True,
+        )
+
+    session_id = session_store.load_latest_session_id()
+    loaded = session_store.load_session(session_id)
+    assistant_messages = [
+        message.content for message in loaded.context.history if message.role == "assistant"
+    ]
+
+    assert exit_code == 0
+    assert tool.seen_arguments == [{"path": "notes.txt"}]
+    assert "final answer" in output.getvalue()
+    assert assistant_messages[-1] == "final answer"

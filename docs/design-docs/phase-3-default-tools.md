@@ -108,6 +108,10 @@ Module responsibilities:
 
 This keeps names explicit and avoids a catch-all helpers module.
 
+`ToolRegistry` remains the execution choke point. Capability policy still controls
+which tools are enabled, and approval handling for unsafe tool calls should stay
+centralized at the registry boundary rather than being reimplemented in each tool.
+
 ## 6. Tool Runtime Model
 
 ### 6.1 Tool runtime configuration
@@ -124,6 +128,7 @@ class ToolRuntimeConfig:
     max_write_bytes: int = 128_000
     max_search_results: int = 8
     max_fetch_chars: int = 20_000
+    max_fetch_bytes: int = 512_000
 ```
 
 Design intent:
@@ -140,8 +145,8 @@ Add a separate policy object for capability switches:
 @dataclass(frozen=True)
 class ToolPolicy:
     allow_network: bool = True
-    allow_write: bool = False
-    allow_bash: bool = False
+    allow_write: bool = True
+    allow_bash: bool = True
 ```
 
 We should distinguish between three concepts:
@@ -150,14 +155,22 @@ We should distinguish between three concepts:
 - enabled tools: tools allowed by the local runtime policy
 - advertised tools: tools actually exposed to the model in the current run
 
-Recommended default policy:
+Default policy:
 
 - `Read`, `Glob`, `Grep`: enabled by default
-- `WebSearch`, `WebFetch`: enabled by default when network is allowed
-- `Write`, `Edit`: built in but disabled unless write access is enabled
-- `Bash`: built in but disabled unless shell access is enabled
+- `WebSearch`, `WebFetch`: enabled by default (when network is allowed)
+- `Write`, `Edit`: enabled by default
+- `Bash`: enabled by default
 
-This gives a useful default while avoiding surprising mutation or shell execution.
+> **Note:** As of this revision, `allow_write` and `allow_bash` default to `True`
+> for a useful out-of-box experience. In earlier drafts these defaulted to `False`.
+> Users who want the more restrictive behavior should use `--deny-write` and
+> `--deny-bash` CLI flags or set `allow_write: false` and `allow_bash: false` in
+> their settings file.
+
+All tools are enabled by default for a useful out-of-box experience. Users can
+disallow specific capabilities via CLI flags (`--deny-write`, `--deny-bash`,
+`--deny-network`) or settings file options.
 
 ### 6.3 Result normalization
 
@@ -200,7 +213,7 @@ Recommended helper shape:
 
 ```python
 def build_tool_result_content(payload: dict[str, Any]) -> str:
-    return json.dumps(payload, ensure_ascii=True)
+    return json.dumps(payload, ensure_ascii=False)
 ```
 
 Why this matters:
@@ -255,7 +268,7 @@ Suggested arguments:
 
 Rules:
 
-- disabled unless write access is enabled
+- enabled by default; can be disabled via `--deny-write` flag or settings
 - must fail if the target file already exists
 - must fail when the path resolves outside `cwd`
 - should enforce a payload size limit
@@ -285,7 +298,7 @@ Suggested `EditOperation` shape:
 
 Rules:
 
-- disabled unless write access is enabled
+- enabled by default; can be disabled via `--deny-write` flag or settings
 - target file must already exist
 - when `replace_all` is `false`, `old_text` must match exactly once
 - when `replace_all` is `true`, zero matches should still fail
@@ -313,7 +326,7 @@ Suggested arguments:
 
 Rules:
 
-- disabled unless shell access is enabled
+- enabled by default; can be disabled via `--deny-bash` flag or settings
 - execution happens with `cwd` set to the workspace root
 - commands are not sandboxed and may access resources outside `cwd` with the current user's permissions
 - command timeout defaults to the runtime config limit
@@ -424,11 +437,11 @@ Suggested arguments:
 Default implementation choice:
 
 - use the current `ddgs` Python package
-- call text search with `backend="duckduckgo"` so the default behavior matches the product requirement rather than using a multi-engine blend
+- rely on the locked `ddgs` version's default backend selection instead of forcing an engine name whose semantics may shift across releases
 
 Why this is the right default:
 
-- it matches the requested DuckDuckGo-first behavior
+- it keeps runtime behavior aligned with the installed dependency rather than a backend string with unstable meaning
 - it avoids maintaining our own brittle scraping adapter
 - it keeps search concerns isolated behind one small tool implementation
 
@@ -444,6 +457,8 @@ Suggested result item fields:
 - `snippet`
 - `source`
 - `rank`
+
+`source` should be a normalized provenance hint from the upstream result when available, or a stable fallback such as `"ddgs"` when the library does not expose engine-level source metadata.
 
 Operational rules:
 
@@ -487,29 +502,35 @@ Operational rules:
 - support redirects
 - reject unsupported schemes
 - apply byte and character limits before returning content
+- decode byte-limited responses with truncation-aware codecs so complete multibyte characters survive full reads and exact-boundary truncation
 - if extraction fails but fetch succeeds, return a plain-text fallback extracted from the response body when possible
 
 ## 9. CLI and Configuration Implications
 
 Phase 3 should keep tool wiring in `cli/` and tool behavior in `agent/tools/`.
 
-Recommended CLI-facing controls:
+CLI-facing controls:
 
-- `agentlet chat --allow-write`
-- `agentlet chat --allow-bash`
-- `agentlet chat --deny-network`
+- `agentlet chat --deny-write` - Disable Write and Edit tools
+- `agentlet chat --deny-bash` - Disable Bash tool
+- `agentlet chat --deny-network` - Disable WebSearch and WebFetch tools
 
-Recommended settings-file fields:
+Settings-file fields:
 
-- `allow_write`
-- `allow_bash`
-- `allow_network`
+- `allow_write` - Set to `false` to disable Write/Edit tools
+- `allow_bash` - Set to `false` to disable Bash tool
+- `allow_network` - Set to `false` to disable WebSearch/WebFetch tools
 
-Recommended startup behavior:
+Startup behavior:
 
 - build the default registry from CLI/settings policy
 - expose only enabled tools to the model
 - show the enabled tool set in `/status`
+
+The policy resolution order (highest priority first):
+1. CLI `--deny-*` flags (explicitly disable)
+2. Settings file values (explicitly enable/disable)
+3. Default values (all enabled)
 
 This is simpler than an interactive approval flow and fits the current CLI architecture better.
 

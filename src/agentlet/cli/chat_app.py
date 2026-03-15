@@ -10,7 +10,11 @@ from typing import TypedDict
 
 from rich.console import Console
 
-from agentlet.agent.agent_loop import AgentLoop, AgentTurnResult
+from agentlet.agent.agent_loop import (
+    DEFAULT_MAX_ITERATIONS,
+    AgentLoop,
+    AgentTurnResult,
+)
 from agentlet.agent.context import Context
 from agentlet.agent.prompts.system_prompt import build_system_prompt
 from agentlet.agent.providers.registry import (
@@ -21,6 +25,7 @@ from agentlet.agent.providers.registry import (
     ProviderRegistry,
 )
 from agentlet.agent.tools.registry import ToolRegistry
+from agentlet.cli.approvals import InteractiveApprovalHandler
 from agentlet.cli.presenter import ChatPresenter
 from agentlet.cli.prompt import create_prompt_session
 from agentlet.cli.repl import run_repl
@@ -39,6 +44,9 @@ class ChatSettingsArgs(Protocol):
     model: str | None
     temperature: float | None
     max_tokens: int | None
+    max_iterations: int | None
+    max_html_extract_bytes: int | None
+    auto_approve: bool
 
 
 class ChatSettingsOverrides(TypedDict):
@@ -48,6 +56,8 @@ class ChatSettingsOverrides(TypedDict):
     model: str | None
     temperature: float | None
     max_tokens: int | None
+    max_iterations: int | None
+    max_html_extract_bytes: int | None
 
 
 async def run_chat(
@@ -84,6 +94,7 @@ def _create_agent_loop(
         provider=provider,
         tool_registry=tool_registry or ToolRegistry(),
         system_prompt=system_prompt or build_system_prompt(),
+        max_iterations=settings.max_iterations or DEFAULT_MAX_ITERATIONS,
     )
 
 
@@ -119,30 +130,45 @@ def run_chat_command(
     message, interactive = _resolve_chat_mode(args, stdin=stdin, stdin_isatty=stdin_isatty)
     working_dir = cwd or Path.cwd()
     chat_settings = _settings_from_args(args, fallback=settings)
+    effective_tool_registry = tool_registry or ToolRegistry()
 
     if not interactive:
-        result = asyncio.run(
-            run_chat(
-                message=message or "",
-                settings=chat_settings,
-                provider_registry=provider_registry,
-                tool_registry=tool_registry,
-            )
+        approval_handler = InteractiveApprovalHandler(
+            stdin=stdin,
+            stdout=stderr,
+            auto_approve=args.auto_approve,
         )
-        print(result.output, file=stdout)
-        return 0
+        effective_tool_registry.set_approval_handler(approval_handler)
+        try:
+            result = asyncio.run(
+                run_chat(
+                    message=message or "",
+                    settings=chat_settings,
+                    provider_registry=provider_registry,
+                    tool_registry=effective_tool_registry,
+                )
+            )
+            print(result.output, file=stdout)
+            return 0
+        finally:
+            approval_handler.close()
 
     session_store = SessionStore(working_dir)
     system_prompt = build_system_prompt()
     config = _create_provider_config(chat_settings)
+    prompt = prompt_session or create_prompt_session(session_store.history_path)
+    approval_handler = InteractiveApprovalHandler(
+        prompt_input=prompt,
+        auto_approve=args.auto_approve,
+    )
+    effective_tool_registry.set_approval_handler(approval_handler)
     loop = _create_agent_loop(
         settings=chat_settings,
         provider_registry=provider_registry,
-        tool_registry=tool_registry,
+        tool_registry=effective_tool_registry,
         system_prompt=system_prompt,
         _config=config,
     )
-    prompt = prompt_session or create_prompt_session(session_store.history_path)
     info = session_store.start_session(
         provider_name=config.name,
         model=config.model,
@@ -157,14 +183,21 @@ def run_chat_command(
     )
 
     presenter = ChatPresenter(console or Console(file=stdout, stderr=False))
-    return run_repl(
-        loop=loop,
-        prompt_input=prompt,
-        presenter=presenter,
-        session_store=session_store,
-        cwd=working_dir,
-        loaded_session=loaded_session,
-    )
+
+    async def _run_repl_async() -> int:
+        return await run_repl(
+            loop=loop,
+            prompt_input=prompt,
+            presenter=presenter,
+            session_store=session_store,
+            cwd=working_dir,
+            loaded_session=loaded_session,
+        )
+
+    try:
+        return asyncio.run(_run_repl_async())
+    finally:
+        approval_handler.close()
 
 
 def _settings_from_args(
@@ -180,6 +213,8 @@ def _settings_from_args(
         "model": args.model,
         "temperature": args.temperature,
         "max_tokens": args.max_tokens,
+        "max_iterations": args.max_iterations,
+        "max_html_extract_bytes": args.max_html_extract_bytes,
     }
     provider_from_cli = overrides["provider"]
     provider_overridden = provider_from_cli is not None and provider_from_cli != fallback.provider
@@ -199,6 +234,16 @@ def _settings_from_args(
             overrides["max_tokens"]
             if overrides["max_tokens"] is not None
             else fallback.max_tokens
+        ),
+        max_iterations=(
+            overrides["max_iterations"]
+            if overrides["max_iterations"] is not None
+            else fallback.max_iterations
+        ),
+        max_html_extract_bytes=(
+            overrides["max_html_extract_bytes"]
+            if overrides["max_html_extract_bytes"] is not None
+            else fallback.max_html_extract_bytes
         ),
     )
 

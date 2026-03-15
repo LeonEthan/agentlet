@@ -22,6 +22,12 @@ def test_agent_loop_returns_direct_response() -> None:
     assert provider.seen_messages == [["system", "user"]]
 
 
+def test_agent_loop_uses_small_default_max_iterations() -> None:
+    loop = AgentLoop(provider=FakeProvider([]))
+
+    assert loop.max_iterations == 8
+
+
 def test_agent_loop_executes_tool_calls() -> None:
     provider = FakeProvider(
         [
@@ -175,3 +181,43 @@ def test_agent_loop_emits_stream_events_and_commits_final_state() -> None:
         "assistant_completed",
         "turn_completed",
     ]
+
+
+def test_agent_loop_ignores_stale_tool_calls_on_final_response() -> None:
+    class RecordingEchoTool:
+        spec = EchoTool.spec
+
+        def __init__(self) -> None:
+            self.calls: list[dict[str, str]] = []
+
+        async def execute(self, arguments: dict[str, str]) -> str:
+            self.calls.append(arguments)
+            return arguments["text"]
+
+    tool = RecordingEchoTool()
+    provider = FakeProvider(
+        [
+            LLMResponse(
+                content="final answer",
+                tool_calls=(
+                    ToolCall(
+                        id="call-1",
+                        name="echo",
+                        arguments_json='{"text":"stale"}',
+                    ),
+                ),
+                finish_reason="stop",
+            )
+        ]
+    )
+    loop = AgentLoop(
+        provider=provider,
+        tool_registry=ToolRegistry([tool]),
+    )
+
+    result = asyncio.run(loop.run_turn("hello"))
+
+    assert result.output == "final answer"
+    assert tool.calls == []
+    assert [message.role for message in result.context.history] == ["user", "assistant"]
+    assert result.context.history[-1].tool_calls == ()

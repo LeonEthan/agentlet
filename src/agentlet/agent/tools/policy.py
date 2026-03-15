@@ -6,6 +6,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+DEFAULT_MAX_HTML_EXTRACT_BYTES = 2_000_000
+MAX_HTML_EXTRACT_BYTES_LIMIT = 10_000_000
+
+
 @dataclass(frozen=True)
 class ToolRuntimeConfig:
     """Runtime configuration injected into built-in tools at construction time.
@@ -21,6 +25,8 @@ class ToolRuntimeConfig:
     max_write_bytes: int = 128_000
     max_search_results: int = 8
     max_fetch_chars: int = 20_000
+    max_fetch_bytes: int = 512_000
+    max_html_extract_bytes: int = DEFAULT_MAX_HTML_EXTRACT_BYTES
 
 
 @dataclass(frozen=True)

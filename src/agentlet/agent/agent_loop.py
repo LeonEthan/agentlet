@@ -52,6 +52,9 @@ class MaxIterationsExceeded(RuntimeError):
     pass
 
 
+DEFAULT_MAX_ITERATIONS = 8
+
+
 class AgentLoop:
     """Coordinate context building, model calls, and optional tool execution."""
 
@@ -61,7 +64,7 @@ class AgentLoop:
         tool_registry: ToolRegistry | None = None,
         *,
         system_prompt: str | None = None,
-        max_iterations: int = 8,
+        max_iterations: int = DEFAULT_MAX_ITERATIONS,
     ) -> None:
         if max_iterations < 1:
             raise ValueError("max_iterations must be at least 1.")
@@ -107,20 +110,21 @@ class AgentLoop:
                     event_sink=event_sink,
                     stream=stream,
                 )
+                tool_calls = self._resolve_tool_calls(response)
                 active_context.add_assistant_message(
                     response.content,
-                    list(response.tool_calls),
+                    list(tool_calls),
                 )
                 self._emit(
                     event_sink,
                     TurnEvent(
                         kind="assistant_completed",
                         content=response.content,
-                        tool_calls=response.tool_calls,
+                        tool_calls=tool_calls,
                     ),
                 )
 
-                if not response.tool_calls:
+                if not tool_calls:
                     # Commit the successful turn back into the caller-provided
                     # context only after all provider/tool work has completed.
                     if context is not None:
@@ -137,7 +141,7 @@ class AgentLoop:
                     )
                     return result
 
-                for call in response.tool_calls:
+                for call in tool_calls:
                     self._emit(
                         event_sink,
                         TurnEvent(kind="tool_requested", tool_call=call),
@@ -188,6 +192,16 @@ class AgentLoop:
         if final_response is None:
             raise RuntimeError("Provider stream did not produce a final response.")
         return final_response
+
+    def _resolve_tool_calls(self, response: LLMResponse) -> tuple[ToolCall, ...]:
+        """Return tool calls that should actually be executed for this response."""
+        if not response.tool_calls:
+            return ()
+
+        finish_reason = (response.finish_reason or "").lower()
+        if finish_reason and finish_reason not in {"tool_calls", "function_call"}:
+            return ()
+        return response.tool_calls
 
     def _emit(
         self,

@@ -74,16 +74,9 @@ def _truncate_content(content: str, max_bytes: int) -> tuple[str, bool]:
     if len(encoded) <= max_bytes:
         return content, False
 
-    # Truncate to max_bytes, then clean up partial UTF-8 sequences
+    # The source string is already valid UTF-8, so decode("ignore") only
+    # drops a trailing partial code point from the byte-limited prefix.
     truncated_bytes = encoded[:max_bytes]
-    # Remove potential partial UTF-8 character at the end
-    while truncated_bytes and (truncated_bytes[-1] & 0x80) and not (truncated_bytes[-1] & 0x40):
-        truncated_bytes = truncated_bytes[:-1]
-
-    # Remove the leading continuation byte marker if present
-    if truncated_bytes and (truncated_bytes[-1] & 0x80):
-        truncated_bytes = truncated_bytes[:-1]
-
     return truncated_bytes.decode("utf-8", errors="ignore"), True
 
 

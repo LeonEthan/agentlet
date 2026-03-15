@@ -44,6 +44,22 @@ class ToolExecutionError(RuntimeError):
     pass
 
 
+@dataclass(frozen=True)
+class ToolApprovalRequest:
+    """Normalized approval request emitted before unsafe tool execution."""
+
+    tool_name: str
+    scope: str
+    arguments: dict[str, Any]
+    summary: str
+
+
+class ToolApprovalHandler(Protocol):
+    """Small approval interface used by the registry before unsafe tool calls."""
+
+    async def approve(self, request: ToolApprovalRequest) -> bool: ...
+
+
 def build_tool_result_content(payload: dict[str, Any]) -> str:
     """Build a consistent JSON text envelope for tool results.
 
@@ -58,8 +74,14 @@ def build_tool_result_content(payload: dict[str, Any]) -> str:
 class ToolRegistry:
     """Register tools and execute them behind one narrow boundary."""
 
-    def __init__(self, tools: list[Tool] | None = None) -> None:
+    def __init__(
+        self,
+        tools: list[Tool] | None = None,
+        *,
+        approval_handler: ToolApprovalHandler | None = None,
+    ) -> None:
         self._tools: dict[str, Tool] = {}
+        self._approval_handler = approval_handler
         for tool in tools or []:
             self.register(tool)
 
@@ -70,6 +92,14 @@ class ToolRegistry:
     def get_tool_schemas(self) -> list[ToolSpec]:
         """Expose provider-visible schemas for all registered tools."""
         return [tool.spec for tool in self._tools.values()]
+
+    def get_tool_names(self) -> list[str]:
+        """Return enabled tool names in registration order."""
+        return list(self._tools.keys())
+
+    def set_approval_handler(self, approval_handler: ToolApprovalHandler | None) -> None:
+        """Install or clear the approval handler used for unsafe tool calls."""
+        self._approval_handler = approval_handler
 
     async def execute(self, call: ToolCall) -> ToolResult:
         """Decode arguments, execute the tool, and normalize the returned result."""
@@ -91,6 +121,16 @@ class ToolRegistry:
                 f"Tool {call.name} arguments must decode to an object."
             )
 
+        approval_request = _build_approval_request(call.name, arguments)
+        if approval_request is not None:
+            if self._approval_handler is None:
+                raise ToolExecutionError(
+                    f"Tool {call.name} requires approval, but no approval handler is configured."
+                )
+            approved = await self._approval_handler.approve(approval_request)
+            if not approved:
+                raise ToolExecutionError(f"Tool {call.name} execution was not approved.")
+
         result = await tool.execute(arguments)
         # Tool output is normalized back into a message payload so the agent loop
         # can append it to context without knowing tool-specific details.
@@ -99,3 +139,39 @@ class ToolRegistry:
             name=call.name,
             content=result,
         )
+
+
+_APPROVAL_SCOPE_BY_TOOL = {
+    "write": "write",
+    "edit": "write",
+    "bash": "bash",
+    "web_search": "network",
+    "web_fetch": "network",
+}
+
+
+def _build_approval_request(
+    tool_name: str,
+    arguments: dict[str, Any],
+) -> ToolApprovalRequest | None:
+    """Build an approval request for tools that need explicit user consent."""
+    scope = _APPROVAL_SCOPE_BY_TOOL.get(tool_name)
+    if scope is None:
+        return None
+
+    if tool_name in {"write", "edit"}:
+        target = str(arguments.get("path", ""))
+    elif tool_name == "bash":
+        target = str(arguments.get("command", ""))
+    elif tool_name == "web_search":
+        target = str(arguments.get("query", ""))
+    else:
+        target = str(arguments.get("url", ""))
+
+    summary = f"{tool_name} {target}".strip()
+    return ToolApprovalRequest(
+        tool_name=tool_name,
+        scope=scope,
+        arguments=arguments,
+        summary=summary,
+    )

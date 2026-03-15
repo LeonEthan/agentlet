@@ -2,6 +2,7 @@ from __future__ import annotations
 
 """Slash command parsing and local transcript summaries."""
 
+from dataclasses import dataclass
 from enum import Enum
 
 from agentlet.agent.context import Message
@@ -24,6 +25,15 @@ _COMMANDS: set[str] = {cmd.value for cmd in CommandName}
 
 class CommandError(ValueError):
     """Raised when interactive slash command input is invalid."""
+
+
+@dataclass(frozen=True)
+class TurnSummary:
+    """One displayed user/assistant turn with its original turn number."""
+
+    number: int
+    user_text: str
+    assistant_text: str
 
 
 def parse_command(raw_input: str) -> CommandName | None:
@@ -52,16 +62,20 @@ def command_help_lines() -> list[str]:
     ]
 
 
-def summarize_history(history: list[Message], *, limit: int = 10) -> list[tuple[str, str]]:
+def summarize_history(history: list[Message], *, limit: int = 10) -> list[TurnSummary]:
     """Summarize recent user/assistant turns for the interactive shell."""
-    turns: list[tuple[str, str]] = []
+    turns: list[TurnSummary] = []
     pending_user: str | None = None
     pending_assistant = ""
+    turn_number = 0
 
     for message in history:
         if message.role == "user":
             if pending_user is not None:
-                turns.append((pending_user, pending_assistant))
+                turn_number += 1
+                turns.append(
+                    TurnSummary(turn_number, pending_user, pending_assistant)
+                )
             pending_user = message.content or ""
             pending_assistant = ""
             continue
@@ -69,6 +83,7 @@ def summarize_history(history: list[Message], *, limit: int = 10) -> list[tuple[
             pending_assistant = message.content or ""
 
     if pending_user is not None:
-        turns.append((pending_user, pending_assistant))
+        turn_number += 1
+        turns.append(TurnSummary(turn_number, pending_user, pending_assistant))
 
     return turns[-limit:]

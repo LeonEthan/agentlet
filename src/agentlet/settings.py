@@ -8,10 +8,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from agentlet.agent.agent_loop import DEFAULT_MAX_ITERATIONS
 from agentlet.agent.providers.registry import (
     DEFAULT_MODEL,
     DEFAULT_PROVIDER,
     DEFAULT_TEMPERATURE,
+)
+from agentlet.agent.tools.policy import (
+    DEFAULT_MAX_HTML_EXTRACT_BYTES,
+    MAX_HTML_EXTRACT_BYTES_LIMIT,
 )
 
 SETTINGS_DIRNAME = ".agentlet"
@@ -20,7 +25,7 @@ SETTINGS_FILENAME_LEGACY = "setting.json"
 
 _STRING_FIELDS = {"provider", "model", "api_key", "api_base"}
 _FLOAT_FIELDS = {"temperature"}
-_INT_FIELDS = {"max_tokens"}
+_INT_FIELDS = {"max_tokens", "max_iterations", "max_html_extract_bytes"}
 _BOOL_FIELDS = {"allow_write", "allow_bash", "allow_network"}
 _ALLOWED_FIELDS = _STRING_FIELDS | _FLOAT_FIELDS | _INT_FIELDS | _BOOL_FIELDS
 
@@ -39,6 +44,8 @@ class AgentletSettings:
     api_base: str | None = None
     temperature: float | None = None
     max_tokens: int | None = None
+    max_iterations: int | None = None
+    max_html_extract_bytes: int | None = None
     # Tool policy settings
     allow_write: bool | None = None
     allow_bash: bool | None = None
@@ -53,6 +60,8 @@ class AgentletSettings:
             "api_base": self.api_base,
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
+            "max_iterations": self.max_iterations,
+            "max_html_extract_bytes": self.max_html_extract_bytes,
             "allow_write": self.allow_write,
             "allow_bash": self.allow_bash,
             "allow_network": self.allow_network,
@@ -103,6 +112,10 @@ def _build_settings_from_dict(data: dict[str, Any], path: Path) -> AgentletSetti
         api_base=_validate_string_field(data, "api_base", path),
         temperature=_validate_float_field(data, "temperature", path),
         max_tokens=_validate_int_field(data, "max_tokens", path),
+        max_iterations=_validate_int_field(data, "max_iterations", path, minimum=1),
+        max_html_extract_bytes=_validate_int_field(
+            data, "max_html_extract_bytes", path, minimum=1, maximum=MAX_HTML_EXTRACT_BYTES_LIMIT
+        ),
         allow_write=_validate_bool_field(data, "allow_write", path),
         allow_bash=_validate_bool_field(data, "allow_bash", path),
         allow_network=_validate_bool_field(data, "allow_network", path),
@@ -167,6 +180,9 @@ def resolve_settings_defaults(stored_settings: AgentletSettings) -> AgentletSett
         if stored_settings.temperature is not None
         else DEFAULT_TEMPERATURE,
         max_tokens=stored_settings.max_tokens,
+        max_iterations=stored_settings.max_iterations or DEFAULT_MAX_ITERATIONS,
+        max_html_extract_bytes=stored_settings.max_html_extract_bytes
+        or DEFAULT_MAX_HTML_EXTRACT_BYTES,
     )
 
 
@@ -210,12 +226,27 @@ def _validate_float_field(payload: dict[str, Any], key: str, path: Path) -> floa
     return float(value)
 
 
-def _validate_int_field(payload: dict[str, Any], key: str, path: Path) -> int | None:
+def _validate_int_field(
+    payload: dict[str, Any],
+    key: str,
+    path: Path,
+    *,
+    minimum: int | None = None,
+    maximum: int | None = None,
+) -> int | None:
     value = payload.get(key)
     if value is None:
         return None
     if isinstance(value, bool) or not isinstance(value, int):
         raise SettingsError(f"Settings key `{key}` in {path} must be an integer or null.")
+    if minimum is not None and value < minimum:
+        raise SettingsError(
+            f"Settings key `{key}` in {path} must be an integer >= {minimum} or null."
+        )
+    if maximum is not None and value > maximum:
+        raise SettingsError(
+            f"Settings key `{key}` in {path} must be an integer <= {maximum} or null."
+        )
     return value
 
 

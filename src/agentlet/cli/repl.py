@@ -2,13 +2,13 @@ from __future__ import annotations
 
 """Interactive REPL orchestration for phase-2 chat sessions."""
 
-import asyncio
 import time
 from pathlib import Path
 from typing import Protocol
 
 from agentlet.agent.agent_loop import AgentLoop
 from agentlet.agent.context import Context
+from agentlet.cli.approvals import ApprovalPromptClosed
 from agentlet.cli.commands import CommandError, command_help_lines, parse_command, summarize_history
 from agentlet.cli.presenter import ChatPresenter
 from agentlet.cli.sessions import LoadedSession, SessionStore, SessionTurnRecorder
@@ -17,10 +17,11 @@ from agentlet.cli.sessions import LoadedSession, SessionStore, SessionTurnRecord
 class PromptInput(Protocol):
     """Small prompt protocol so smoke tests can inject a fake source."""
 
-    def prompt(self, prompt_text: str) -> str: ...
+    def prompt(self, prompt_text: str | None = None) -> str: ...
+    async def prompt_async(self, prompt_text: str | None = None) -> str: ...
 
 
-def run_repl(
+async def run_repl(
     *,
     loop: AgentLoop,
     prompt_input: PromptInput,
@@ -44,7 +45,7 @@ def run_repl(
 
     while True:
         try:
-            raw_input = prompt_input.prompt("> ")
+            raw_input = await prompt_input.prompt_async()
             last_idle_interrupt = 0.0
         except KeyboardInterrupt:
             now = time.monotonic()
@@ -79,6 +80,7 @@ def run_repl(
                     model=current_session.model,
                     cwd=cwd,
                     message_count=len(context.history),
+                    tool_names=loop.tool_registry.get_tool_names(),
                 )
                 continue
             if command == "history":
@@ -115,18 +117,20 @@ def run_repl(
             presenter.handle_event(event)
 
         try:
-            asyncio.run(
-                loop.run_turn(
-                    message,
-                    context=context,
-                    event_sink=handle_event,
-                    stream=True,
-                )
+            await loop.run_turn(
+                message,
+                context=context,
+                event_sink=handle_event,
+                stream=True,
             )
         except KeyboardInterrupt:
             presenter.stop_stream()
             presenter.show_notice("Turn cancelled.")
             continue
+        except ApprovalPromptClosed:
+            presenter.stop_stream()
+            presenter.show_notice("Session closed.")
+            return 0
         except Exception as exc:
             presenter.stop_stream()
             presenter.show_error("Turn failed", str(exc))
