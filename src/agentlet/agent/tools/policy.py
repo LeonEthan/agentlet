@@ -7,6 +7,7 @@ from pathlib import Path
 
 
 DEFAULT_MAX_HTML_EXTRACT_BYTES = 2_000_000
+MAX_HTML_EXTRACT_BYTES_LIMIT = 10_000_000
 
 
 @dataclass(frozen=True)

@@ -11,6 +11,7 @@ from agentlet.agent.providers.registry import (
 )
 from agentlet.agent.tools.policy import (
     DEFAULT_MAX_HTML_EXTRACT_BYTES,
+    MAX_HTML_EXTRACT_BYTES_LIMIT,
     ToolPolicy,
     ToolRuntimeConfig,
 )
@@ -28,16 +29,24 @@ from agentlet.agent.tools.registry import ToolRegistry
 from agentlet.cli.chat_app import ChatCLIError, _settings_from_args, run_chat_command
 
 
-def _int_at_least(minimum: int):
-    """Build an argparse type that rejects integers smaller than minimum."""
+def _int_in_range(minimum: int, maximum: int | None = None):
+    """Build an argparse type that rejects integers outside the range."""
 
     def parse(raw_value: str) -> int:
         value = int(raw_value)
         if value < minimum:
             raise argparse.ArgumentTypeError(f"must be an integer >= {minimum}")
+        if maximum is not None and value > maximum:
+            raise argparse.ArgumentTypeError(
+                f"must be an integer between {minimum} and {maximum}"
+            )
         return value
 
     return parse
+
+
+# Backward compatibility: _int_at_least is now a thin wrapper around _int_in_range
+_int_at_least = _int_in_range
 
 
 def build_parser(defaults: AgentletSettings) -> argparse.ArgumentParser:
@@ -71,7 +80,7 @@ def build_parser(defaults: AgentletSettings) -> argparse.ArgumentParser:
     )
     init.add_argument(
         "--max-html-extract-bytes",
-        type=_int_at_least(1),
+        type=_int_in_range(1, MAX_HTML_EXTRACT_BYTES_LIMIT),
         default=defaults.max_html_extract_bytes,
         help="Default HTML fetch byte budget to use during readable-text extraction.",
     )
@@ -115,7 +124,7 @@ def build_parser(defaults: AgentletSettings) -> argparse.ArgumentParser:
     )
     chat.add_argument(
         "--max-html-extract-bytes",
-        type=_int_at_least(1),
+        type=_int_in_range(1, MAX_HTML_EXTRACT_BYTES_LIMIT),
         default=defaults.max_html_extract_bytes,
         help="Byte budget used for HTML readable-text extraction before truncating output.",
     )

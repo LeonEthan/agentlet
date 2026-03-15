@@ -14,7 +14,10 @@ from agentlet.agent.providers.registry import (
     DEFAULT_PROVIDER,
     DEFAULT_TEMPERATURE,
 )
-from agentlet.agent.tools.policy import DEFAULT_MAX_HTML_EXTRACT_BYTES
+from agentlet.agent.tools.policy import (
+    DEFAULT_MAX_HTML_EXTRACT_BYTES,
+    MAX_HTML_EXTRACT_BYTES_LIMIT,
+)
 
 SETTINGS_DIRNAME = ".agentlet"
 SETTINGS_FILENAME = "settings.json"
@@ -111,7 +114,7 @@ def _build_settings_from_dict(data: dict[str, Any], path: Path) -> AgentletSetti
         max_tokens=_validate_int_field(data, "max_tokens", path),
         max_iterations=_validate_int_field(data, "max_iterations", path, minimum=1),
         max_html_extract_bytes=_validate_int_field(
-            data, "max_html_extract_bytes", path, minimum=1, maximum=10_000_000
+            data, "max_html_extract_bytes", path, minimum=1, maximum=MAX_HTML_EXTRACT_BYTES_LIMIT
         ),
         allow_write=_validate_bool_field(data, "allow_write", path),
         allow_bash=_validate_bool_field(data, "allow_bash", path),

@@ -23,6 +23,20 @@ class InteractiveApprovalHandler:
     stdout: TextIO | None = None
     auto_approve: bool = False
     approved_scopes: set[str] = field(default_factory=set)
+    _tty_file: TextIO | None = field(default=None, repr=False)
+    _tty_attempted: bool = field(default=False, repr=False)
+
+    def __enter__(self) -> InteractiveApprovalHandler:
+        return self
+
+    def __exit__(self, exc_type: object, exc_val: object, exc_tb: object) -> None:
+        self.close()
+
+    def close(self) -> None:
+        """Close any opened file handles."""
+        if self._tty_file is not None:
+            self._tty_file.close()
+            self._tty_file = None
 
     async def approve(self, request: ToolApprovalRequest) -> bool:
         if self.auto_approve or request.scope in self.approved_scopes:
@@ -51,16 +65,36 @@ class InteractiveApprovalHandler:
             return False
         stdin_isatty = getattr(self.stdin, "isatty", None)
         stdout_isatty = getattr(self.stdout, "isatty", None)
-        return bool(
-            stdin_isatty
+        is_tty = bool(
+            stdin_isatty is not None
             and stdin_isatty()
-            and stdout_isatty
+            and stdout_isatty is not None
             and stdout_isatty()
         )
+        if is_tty:
+            return True
+        # Check if we can open the controlling terminal as a fallback
+        if self._tty_file is None and not self._tty_attempted:
+            self._tty_attempted = True
+            try:
+                tty_file = open("/dev/tty", "r+")
+                # Verify it's actually a TTY before using it
+                if tty_file.isatty():
+                    self._tty_file = tty_file
+                else:
+                    tty_file.close()
+            except (OSError, PermissionError):
+                pass
+        return self._tty_file is not None
 
     def _prompt(self, prompt_text: str) -> str:
         if self.prompt_input is not None:
             return self.prompt_input.prompt(prompt_text)
+        # Use the controlling terminal if available (e.g., when stdin is piped)
+        if self._tty_file is not None:
+            self._tty_file.write(prompt_text)
+            self._tty_file.flush()
+            return self._tty_file.readline()
         assert self.stdin is not None
         assert self.stdout is not None
         self.stdout.write(prompt_text)
